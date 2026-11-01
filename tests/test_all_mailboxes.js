@@ -135,6 +135,12 @@ test('a background refresh waits a minute between reads; Refresh does not', asyn
   await a.run('loadMessages()');   // the Refresh button
   await settle();
   assert.equal(reads, 6);
+  // Reopening the folder shows it at once and reads it again, so a message
+  // just moved there is never missing.
+  await a.run(`selectFolder('inbox')`);
+  await settle();
+  assert.equal(reads, 8);
+  assert.equal(a.run('state.messages.length'), 2);
 });
 
 test('one mailbox failing keeps the others and names the failing one', async () => {

@@ -583,9 +583,9 @@ async function loadAllMail({ quiet = false, join = false, background = false, on
   const view = mailboxView;
   if (quiet && (view.loads || view.actions)) return;
   const key = cacheKey(ALL_MAIL, folder.key);
-  // The timer, coming back to the window and reopening a folder already on
-  // screen read every mailbox, so they wait a minute between reads. Refresh doesn't.
-  if ((background || (quiet && join)) && Date.now() - (allMailRead.get(key) || 0) < ALL_MAIL_REFRESH_MS) return;
+  // The timer and coming back to the window read every mailbox, so they wait a
+  // minute between reads. Opening a folder and Refresh always read it.
+  if (background && Date.now() - (allMailRead.get(key) || 0) < ALL_MAIL_REFRESH_MS) return;
   const request = ++view.requests;
   view.loads++;
   const stale = new Set();  // mailboxes whose read crossed a click on their own mail
