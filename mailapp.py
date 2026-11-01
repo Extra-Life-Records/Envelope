@@ -72,7 +72,7 @@ else:
     _WEBVIEW_IMPORT_ERROR = None
 
 APP_NAME = "SimpleMail"
-APP_VERSION = "1.9.27"
+APP_VERSION = "1.9.28"
 APP_REPO = "Extra-Life-Records/SimpleMail"  # owner/repo for auto-updates
 CONFIG_DIR = Path(os.environ.get("APPDATA", str(Path.home()))) / APP_NAME
 CONFIG_FILE = CONFIG_DIR / "config.json"
@@ -80,9 +80,14 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 DEFAULTS = {
     "accounts": [],          # list of account dicts (see ACCOUNT_DEFAULTS)
     "active_account": "",    # id of the last-used account
+    "all_mailboxes": False,  # the window was last on All mailboxes (every mailbox as one)
     "max_messages": 100,
     "ui_scale": "default",  # compact | default | large
 }
+
+# The All mailboxes view's id in the window. Never an account (ids are slugs or cloud:name), so it can never
+# resolve to a mailbox: every message in that view still carries the id of the mailbox it sits in.
+ALL_MAILBOXES = "*all"
 
 # One entry per mailbox. IDENTITY ISOLATION IS THE POINT of this schema:
 # every account carries its own servers, credentials, From address, signature
@@ -1401,6 +1406,7 @@ class Api:
             "cloud_error": cloud_error,
             "accounts": accounts,
             "active_account": cfg.data.get("active_account", ""),
+            "all_mailboxes": bool(cfg.data.get("all_mailboxes")),
             "ui_scale": cfg["ui_scale"],
             "version": APP_VERSION,
             "arch": current_arch(),
@@ -1447,8 +1453,13 @@ class Api:
 
     def set_active_account(self, account_id):
         self._log(f"CALL set_active_account {account_id}")
-        self._acct(account_id)  # validate
-        self.cfg["active_account"] = account_id
+        if account_id == ALL_MAILBOXES:
+            # Remembered as a view only: active_account stays the last real mailbox.
+            self.cfg["all_mailboxes"] = True
+        else:
+            self._acct(account_id)  # validate
+            self.cfg["active_account"] = account_id
+            self.cfg["all_mailboxes"] = False
         self.cfg.save()
         return {"ok": True}
 
@@ -1489,6 +1500,8 @@ class Api:
                 acct["screen_from"] = existing_screen.get(acct["id"], 0)
             accounts.append(acct)
         active = data.get("active_account", "")
+        if active == ALL_MAILBOXES:   # saved while on All mailboxes: keep the last real mailbox
+            active = self.cfg.data.get("active_account", "")
         if active not in cloud_ids and not any(a["id"] == active for a in accounts):
             active = accounts[0]["id"] if accounts else next(iter(sorted(cloud_ids)), "")
         updated = dict(self.cfg.data)

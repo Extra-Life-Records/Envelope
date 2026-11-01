@@ -21,6 +21,13 @@ owner's x64 machine and is published with native x64 and ARM64 downloads.
   (Screener, Rescued, Shop Orders, Updates, Social, Promotions, Sent, Drafts, Archive, Junk, Trash; any other
   server folder is under More folders)
 - ✅ **Mailbox switcher** — a drop-up menu at the bottom of the sidebar
+- ✅ **All mailboxes** — the top of the mailbox switcher (with two or more mailboxes) shows every mailbox as one:
+  one Inbox, one Sent, one Drafts and so on, newest first, each message tagged with the mailbox it is in.
+  Reading, replying, forwarding, drafts, moving, Move to Trash and Mark unread always use that message's own
+  mailbox (a reply is from that address, never another), and right-click only offers that mailbox's folders.
+  New message asks which mailbox it is from. Search covers every mailbox. One mailbox failing only hides its own
+  mail. SimpleMail reopens on All mailboxes if that is where you left it. The agent, Needs you, Activity, Rescue and
+  Clean up stay per mailbox. Cloud mailboxes now each get their own colour dot
 - ✅ **Real HTML email rendering** (sandboxed; remote images blocked until Load images, except from trusted senders
   and people you've written to)
 

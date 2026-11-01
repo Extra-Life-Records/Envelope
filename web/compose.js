@@ -144,18 +144,21 @@ function composeRecoveryDrafts(accountId, drafts) {
   return Array.from(merged.values()).sort((a,b) => b.updated_at.localeCompare(a.updated_at));
 }
 
-async function resumeComposeDraft(draftId) {
+// A draft reopens bound to the mailbox it was saved in (in All mailboxes the
+// row says which); never to whichever mailbox happens to be open.
+async function resumeComposeDraft(draftId, accountId = state.activeAccountId) {
   const request = ++composeRequest;
   if (composeVisible() && !(await closeCompose())) return;
   if (request !== composeRequest) return;
-  const accountId = state.activeAccountId;
-  const account = activeAccount();
+  const viewing = state.activeAccountId;
+  const account = state.accounts.find(a => a.id === accountId);
+  if (!account) { toast("That mailbox is no longer available", true); return; }
   let draft;
   let cached;
   try { cached = JSON.parse(localStorage.getItem(recoveryKey({accountId, id:draftId})) || "null"); } catch {}
   try { draft = await api.get_compose_draft(accountId, draftId); }
   catch (error) { if (cached?.account_id === accountId && cached.revision === 0) draft = cached; else { toast(String(error), true); return; } }
-  if (request !== composeRequest || accountId !== state.activeAccountId) return;
+  if (request !== composeRequest || viewing !== state.activeAccountId) return;
   if (draft.status !== "pending") {
     if (draft.status === "sent") clearComposeRecovery({accountId,id:draftId});
     toast(draft.status === "sent" ? "This draft was already sent" : "Delivery needs checking. Check Sent before creating another message.", true);
