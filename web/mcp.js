@@ -4,7 +4,8 @@
 
 function mcpEnvelope(message, folder) {
   const server = message.server_folder || folder?.server || null;
-  return {uid: message.localDraftId ? null : String(message.server_uid || message.uid),
+  // In All mailboxes each row says which mailbox it sits in.
+  return {account: messageAccountId(message), uid: message.localDraftId ? null : String(message.server_uid || message.uid),
     server_folder: server, validity: message.validity || folder?.validity || null,
     draft_id: message.localDraftId || null,
     from: message.sender || "", subject: message.subject || "", date: message.date || "", seen: !!message.seen,
@@ -24,7 +25,8 @@ async function mcpScreen() {
         from: $("read-meta").querySelector(".sender-line")?.textContent || message.sender || ""};
     }
     return {
-      account: account ? {id: account.id, label: account.label, address: account.identity || account.email} : null,
+      account: allMail() ? {id: "all", label: "All mailboxes"}
+        : account ? {id: account.id, label: account.label, address: account.identity || account.email} : null,
       folder: folder ? {name: folder.name, server_name: folder.server} : null,
       search: mailSearch ? $("search-box").value : "",
       messages: state.messages.slice(0, 50).map((m) => mcpEnvelope(m, folder)),
@@ -40,9 +42,11 @@ async function mcpScreen() {
 
 async function mcpShow(target) {
   try {
-    if (target.account && target.account !== state.activeAccountId) {
-      await selectAccount(target.account);
-      if (state.activeAccountId !== target.account) return {error: "SimpleMail couldn't switch mailbox: is a draft open that can't be saved?"};
+    const wanted = target.account === "all" ? ALL_MAIL : target.account;
+    if (wanted && wanted !== state.activeAccountId) {
+      await selectAccount(wanted);
+      if (state.activeAccountId !== wanted) return {error: wanted === ALL_MAIL ? "All mailboxes needs two or more mailboxes"
+        : "SimpleMail couldn't switch mailbox: is a draft open that can't be saved?"};
     }
     if (target.folder) {
       const want = String(target.folder).toLowerCase();

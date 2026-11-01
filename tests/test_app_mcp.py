@@ -344,6 +344,23 @@ class ToolTests(unittest.TestCase):
         self.tools.screen()
         self.assertEqual(scripts[-1], "mcpScreen()")
 
+    def test_all_mailboxes_rows_get_refs_for_their_own_mailbox(self):
+        window = Mock()
+        scripts = []
+
+        def evaluate_js(script, callback=None):
+            scripts.append(script)
+            callback({"account": {"id": "all", "label": "All mailboxes"}, "messages": [
+                {"account": "cloud:adam", "uid": "m3", "server_folder": "Inbox", "validity": None},
+                {"account": "denby", "uid": "9", "server_folder": "INBOX", "validity": "7"}]})
+        window.evaluate_js.side_effect = evaluate_js
+        self.tools.window = window
+        screen = self.tools.show(account="all", folder="Inbox")
+        self.assertEqual(json.loads(scripts[0][len("mcpShow("):-1]), {"account": "all", "folder": "Inbox"})
+        refs = [unpack(item["message_ref"]) for item in screen["messages"]]
+        self.assertEqual([(r["account"], r["uid"]) for r in refs], [("cloud:adam", "m3"), ("denby", "9")])
+        self.assertEqual([item["account"] for item in screen["messages"]], ["cloud:adam", "denby"])
+
     def test_window_errors_and_missing_window_are_plain_errors(self):
         with self.assertRaisesRegex(ValueError, "window isn't open"):
             self.tools.screen()

@@ -132,9 +132,9 @@ TOOLS = [
          ("account", "draft_id", "revision"), writes=True, outward=True),
     tool("mail_discard_draft", "Throw away a draft.", {"account": ACCOUNT, "draft_id": STRING,
          "revision": {"type": "integer", "minimum": 1}}, ("account", "draft_id", "revision"), writes=True),
-    tool("mail_show", "Put something in front of the owner in the SimpleMail window: a mailbox, a folder, an "
-         "email (message_ref; opening it marks it read) or a draft in the editor (draft_id with account). "
-         "Returns what the window then shows.",
+    tool("mail_show", "Put something in front of the owner in the SimpleMail window: a mailbox (account \"all\" "
+         "is All mailboxes, every mailbox as one list), a folder, an email (message_ref; opening it marks it "
+         "read) or a draft in the editor (draft_id with account). Returns what the window then shows.",
          {"message_ref": REF, "account": ACCOUNT, "folder": FOLDER, "draft_id": STRING}, writes=True),
     tool("mail_screen", "What the SimpleMail window shows right now: the mailbox, folder or search, the listed "
          "emails (with message_refs), the open email and any draft being written."),
@@ -388,11 +388,15 @@ class AppTools:
 
     def _screen_refs(self, screen):
         """Give the listed and open emails message_refs the other tools take."""
-        account = (screen.get("account") or {}).get("id")
+        shown = (screen.get("account") or {}).get("id")
         for item in screen.get("messages", []) + [screen.get("open_message") or {}]:
             uid, folder = item.pop("uid", None), item.pop("server_folder", None)
             validity = item.pop("validity", None)
-            if account and uid and folder and not item.get("draft_id") and (validity or self._cloud(account)):
+            account = item.get("account") or shown   # All mailboxes rows name their own mailbox
+            if account == "all" or account == shown:
+                item.pop("account", None)
+            if account and account != "all" and uid and folder and not item.get("draft_id") and (
+                    validity or self._cloud(account)):
                 item["message_ref"] = self._make_ref(account, folder, uid, validity)
             for key in [key for key, value in item.items() if value in (None, "")]:
                 del item[key]
@@ -755,6 +759,8 @@ class AppTools:
             if account and account != ref["account"]:
                 raise ValueError("That email is in " + ref["account"])
             target = {"account": ref["account"], "folder": ref["folder"], "uid": ref["uid"]}
+        elif account == "all":
+            target = {"account": "all", **({"folder": folder} if folder else {})}
         elif account:
             self._acct(account)
             target = {"account": account}
