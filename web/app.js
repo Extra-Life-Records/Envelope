@@ -9,10 +9,30 @@ const state = {
   currentFolder: "inbox",
   messages: [],         // envelope list for current folder (active account)
   selectedUid: null,
+  accountFolders: new Map(),  // All mailboxes: accountId -> that mailbox's own folders
 };
+
+// All mailboxes shows every mailbox as one. It is a view, never an account: no
+// mailbox id can be "*all", and every message in it carries the id of the
+// mailbox it sits in, so reading, filing and replying always use that mailbox.
+const ALL_MAIL = "*all";
+const ALL_MAIL_REFRESH_MS = 60000;  // a background refresh reads every mailbox, so half as often
+
+function allMail() {
+  return state.activeAccountId === ALL_MAIL;
+}
 
 function activeAccount() {
   return state.accounts.find((a) => a.id === state.activeAccountId) || null;
+}
+
+// The mailbox a message belongs to. Outside All mailboxes that is the open one.
+function messageAccountId(message) {
+  return message?.accountId || state.activeAccountId;
+}
+
+function messageAccount(message) {
+  return state.accounts.find((a) => a.id === messageAccountId(message)) || null;
 }
 
 const $ = (id) => document.getElementById(id);
@@ -33,6 +53,30 @@ let loadedFolder = null;          // cacheKey whose list state.messages holds
 let mailEpoch = 0;                // bumped by each change to mail; older reads are not reused
 let prefetchRun = 0;
 const cacheKey = (accountId, key) => accountId + "\u0000" + key;
+const allMailRead = new Map();    // All mailboxes folder cacheKey -> when its last full read finished
+const accountWork = new Map();    // All mailboxes: accountId -> {epoch, active} for mail actions
+
+function accountActions(accountId) {
+  if (!accountWork.has(accountId)) accountWork.set(accountId, { epoch: 0, active: 0 });
+  return accountWork.get(accountId);
+}
+
+// The cloud mailboxes share one API that allows about five requests a second, and
+// each folder read follows every page, so All mailboxes reads two of them at a time.
+function limiter(max) {
+  let active = 0;
+  const waiting = [];
+  const next = () => {
+    if (active >= max || !waiting.length) return;
+    active++;
+    const { task, resolve, reject } = waiting.shift();
+    Promise.resolve().then(task).then(resolve, reject).finally(() => { active--; next(); });
+  };
+  return (task) => new Promise((resolve, reject) => { waiting.push({ task, resolve, reject }); next(); });
+}
+const cloudReads = limiter(2);
+const readQueue = (accountId) =>
+  state.accounts.find((a) => a.id === accountId)?.provider === "cloud" ? cloudReads : (task) => task();
 
 function rememberFolder() {
   const key = cacheKey(state.activeAccountId, state.currentFolder);
@@ -66,9 +110,18 @@ function queueMailSearch() {
   const query = $("search-box").value.trim();
   if (!query) return loadMessages();
   const folder = state.folders.find(f => f.key === state.currentFolder);
-  mailSearch = {query, serverFolder:['junk','trash'].includes(folder?.key) ? folder.server : null,
+  const scoped = ['junk','trash'].includes(folder?.key);
+  mailSearch = {query, serverFolder:scoped ? folder.server : null,
                 cursor:null, busy:false, items:[], error:null, paused:false,
                 cloud:activeAccount()?.provider === 'cloud', scanned:{index:0, body:0}, phase:null};
+  if (allMail()) {
+    // Every mailbox searches its own mail (its own Junk or Trash when that is open).
+    const members = scoped ? folder.members : state.accounts.map(account => ({accountId:account.id, folder:null}));
+    Object.assign(mailSearch, {all:true, serverFolder:null, scope:scoped ? folder.name : null, retryMore:true,
+      cloud:state.accounts.some(account => account.provider === 'cloud'),
+      members:members.map(member => ({accountId:member.accountId, serverFolder:member.folder?.server || null,
+                                      cursor:null, started:false, error:null}))});
+  }
   state.messages = [];
   $("folder-title").textContent = 'Search results';
   $("markall-btn").disabled = true;
@@ -80,6 +133,7 @@ function queueMailSearch() {
 async function loadSearchResults(more = false) {
   const search = mailSearch;
   if (!search || search.busy || (more && !search.cursor)) return;
+  if (search.all) return loadAllSearchResults(search, more);
   const view = mailboxView;
   const accountId = state.activeAccountId;
   search.busy = true;
@@ -122,6 +176,64 @@ async function loadSearchResults(more = false) {
   }
 }
 
+// All mailboxes: each round reads one more page from every mailbox that has more,
+// newest matches first. It stops like a single mailbox's search (25 new matches,
+// eight seconds, twelve rounds or Pause); Continue carries on per mailbox.
+async function loadAllSearchResults(search, more) {
+  const view = mailboxView;
+  const current = () => search === mailSearch && view === mailboxView;
+  search.busy = true;
+  search.paused = false;
+  search.error = null;
+  if (!more) {
+    search.scanned = {index:0, body:0}; search.phase = null; search.items = [];
+    search.members.forEach(member => Object.assign(member, {cursor:null, started:false}));
+  }
+  search.members.forEach(member => { member.error = null; });  // Continue and Try again retry them
+  renderMessages();
+  try {
+    const started = Date.now();
+    const initialCount = search.items.length;
+    for (let round = 0; round < 12; round++) {
+      const due = search.members.filter(member => !member.error && (!member.started || member.cursor));
+      if (!due.length) break;
+      await Promise.all(due.map(member => readQueue(member.accountId)(async () => {
+        if (!current() || search.paused) return;
+        const previous = member.cursor;
+        try {
+          const page = await api.search_messages(member.accountId, search.query, previous, member.serverFolder);
+          if (!current()) return;
+          if (page.next_cursor && page.next_cursor === previous) throw new Error('Search did not advance. Start the search again.');
+          member.started = true;
+          member.cursor = page.next_cursor || null;
+          search.items.push(...tagMessages(member.accountId, null, page.items));
+          if (page.search_progress) {
+            const progress = page.search_progress;
+            if (['index','body'].includes(progress.phase)) search.scanned[progress.phase] += progress.scanned || 0;
+            search.phase = progress.next_phase || progress.phase;
+          }
+        } catch (error) {
+          if (current()) member.error = String(error);
+        }
+      })));
+      if (!current()) return;
+      search.items = newestFirst([...new Map(search.items.map(item => [item.uid, item])).values()]);
+      search.cursor = search.members.some(member => member.error || !member.started || member.cursor) ? 'more' : null;
+      state.messages = search.items;
+      renderMessages(); updateUnreadCount();
+      if (!search.cursor || search.paused || search.items.length - initialCount >= 25 || Date.now() - started >= 8000) break;
+    }
+  } finally {
+    search.busy = false;
+    if (current()) {
+      const failed = search.members.filter(member => member.error);
+      search.error = failed.length ? `Could not search ${failed.map(member => accountName(member.accountId)).join(', ')}: ${failed[0].error}` : null;
+      renderMessages();
+      updateUnreadCount();
+    }
+  }
+}
+
 function resetMailboxView() {
   resetMailSearch();
   mailboxView = { requests: 0, loads: 0, actions: 0 };
@@ -129,21 +241,30 @@ function resetMailboxView() {
 }
 
 // Reading, moving and changing flags can invalidate a list fetched in parallel.
-async function mailAction(action) {
+// All mailboxes reads each mailbox on its own, so there an action only spoils
+// what was being read from its own mailbox.
+async function mailAction(action, accountId = state.activeAccountId) {
   const view = mailboxView;
+  const work = allMail() ? accountActions(accountId) : null;
   view.actions++;
-  view.requests++;
+  if (work) { work.active++; work.epoch++; } else view.requests++;
   mailEpoch++;
   try { return await action(); }
   finally {
-    view.actions--; view.requests++; mailEpoch++;
+    view.actions--; mailEpoch++;
+    if (work) { work.active--; work.epoch++; } else view.requests++;
     if (view.stale && !view.actions && view === mailboxView) { view.stale = false; Promise.resolve().then(() => loadMessages({ quiet: true })); }
+    if (view.staleAccounts && !view.actions && view === mailboxView) {
+      const only = view.staleAccounts;
+      view.staleAccounts = null;
+      Promise.resolve().then(() => loadAllMail({ quiet: true, only, retry: true }));
+    }
   }
 }
 
 function startMailRefresh() {
   clearInterval(refreshTimer);
-  refreshTimer = setInterval(() => loadMessages({ quiet: true }), MAIL_REFRESH_MS);
+  refreshTimer = setInterval(() => loadMessages({ quiet: true, background: true }), MAIL_REFRESH_MS);
 }
 
 /* ---------------- helpers ---------------- */
@@ -186,7 +307,7 @@ function filingToast(accountId, result, message) {
     try {
       const restored = await api.undo_filing(accountId, result.action_id);
       toast(restored.status === 'undone' ? 'Message restored' : restored.warning, restored.status !== 'undone');
-      if (state.activeAccountId === accountId) await loadMessages({quiet:!mailSearch});
+      if (state.activeAccountId === accountId || allMail()) await loadMessages({quiet:!mailSearch});
     } catch (error) { toast(String(error), true); }
   };
   $('toast').appendChild(button);
@@ -249,14 +370,44 @@ function accountProviderBadge(account, accounts = state.accounts) {
   return duplicated ? (cloud ? "Cloud" : "Existing mailbox") : "";
 }
 
+// Cloud mailboxes can't choose a colour, so each gets its own from the avatar
+// palette instead of all sharing the default blue; that keeps them apart in
+// All mailboxes. Colours set in Settings are kept.
+let accountColors = { accounts: null, colors: null };
+function accountColor(account) {
+  const color = String(account?.color || "");
+  if (account?.provider === "cloud" && color.toLowerCase() === "#2563eb") {
+    if (accountColors.accounts !== state.accounts) {
+      const clouds = state.accounts.filter((a) => a.provider === "cloud").map((a) => a.identity || a.id).sort();
+      accountColors = { accounts: state.accounts, colors: new Map(clouds.map((name, i) => [name, AVATAR_COLORS[i % AVATAR_COLORS.length]])) };
+    }
+    return accountColors.colors.get(account.identity || account.id) || color;
+  }
+  return /^#[0-9a-f]{3,8}$/i.test(color) ? color : "#2563eb";
+}
+
+function accountName(accountId) {
+  return state.accounts.find((a) => a.id === accountId)?.label || accountId;
+}
+
 function accountChip(a) {
   const badge = accountProviderBadge(a);
-  return `<span class="acct-dot" style="background:${escapeHtml(a.color)}"></span>
+  return `<span class="acct-dot" style="background:${accountColor(a)}"></span>
     <span class="acct-label">${escapeHtml(a.label)}${badge ? `<small class="acct-provider">${badge}</small>` : ""}</span>`;
 }
 
+function allMailChip() {
+  const colors = state.accounts.map(accountColor);
+  const slice = 360 / Math.max(colors.length, 1);
+  const ring = colors.length > 1
+    ? `conic-gradient(${colors.map((c, i) => `${c} ${i * slice}deg ${(i + 1) * slice}deg`).join(", ")})` : colors[0];
+  return `<span class="acct-dot" style="background:${ring}"></span>
+    <span class="acct-label">All mailboxes<small class="acct-provider">${state.accounts.length} mailboxes as one</small></span>`;
+}
+
 // The mailbox switcher sits at the bottom of the sidebar: one button showing
-// the open mailbox, which opens a menu of the others above it.
+// the open mailbox, which opens a menu of the others above it, with All
+// mailboxes at the top.
 function renderAccounts() {
   const box = $("accounts");
   const toggle = $("account-switch");
@@ -265,10 +416,14 @@ function renderAccounts() {
   const several = state.accounts.length > 1;
   toggle.hidden = !current;
   toggle.disabled = !several;
-  toggle.title = current ? (current.identity || current.email || "") : "";
-  toggle.innerHTML = current ? accountChip(current) + (several
+  toggle.title = allMail() ? "Every mailbox as one" : current ? (current.identity || current.email || "") : "";
+  toggle.innerHTML = current ? (allMail() ? allMailChip() : accountChip(current)) + (several
     ? '<svg class="chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m18 15-6-6-6 6"/></svg>' : "") : "";
   if (!several) closeAccountMenu();
+  const all = $("all-mail-btn");
+  all.hidden = !several;
+  all.className = "account" + (allMail() ? " active" : "");
+  all.innerHTML = several ? allMailChip() : "";
   state.accounts.forEach((a) => {
     const btn = document.createElement("button");
     btn.className = "account" + (a.id === state.activeAccountId ? " active" : "");
@@ -282,27 +437,54 @@ function renderAccounts() {
 
 function openAccountMenu() {
   if (state.accounts.length < 2) return;
-  $("accounts").hidden = false;
+  $("account-menu").hidden = false;
   $("account-switch").setAttribute("aria-expanded", "true");
-  $("accounts").querySelector(".account.active")?.scrollIntoView({ block: "nearest" });
+  $("account-menu").querySelector(".account.active")?.scrollIntoView({ block: "nearest" });
 }
 
 function closeAccountMenu() {
-  $("accounts").hidden = true;
+  $("account-menu").hidden = true;
   $("account-switch").setAttribute("aria-expanded", "false");
+}
+
+// New message from All mailboxes: pick the mailbox it is from first, so the
+// message is bound to that mailbox from its very first save.
+function openFromMenu() {
+  const list = $("compose-from-list");
+  list.innerHTML = "";
+  state.accounts.forEach((a) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "account";
+    btn.setAttribute("role", "menuitem");
+    btn.title = a.identity;
+    btn.innerHTML = accountChip(a);
+    btn.addEventListener("click", () => { closeFromMenu(); openCompose("", "", "", { accountId: a.id }); });
+    list.appendChild(btn);
+  });
+  $("compose-from-menu").hidden = false;
+  $("compose-btn").setAttribute("aria-expanded", "true");
+  list.querySelector("button")?.focus();
+}
+
+function closeFromMenu() {
+  $("compose-from-menu").hidden = true;
+  $("compose-btn").setAttribute("aria-expanded", "false");
 }
 
 async function selectAccount(accountId) {
   if (typeof composeVisible === "function" && composeVisible() && !(await closeCompose())) return;
   ++composeRequest;
   if (typeof leaveAgentWorkspace === "function" && !leaveAgentWorkspace()) return;
-  if (!state.accounts.some((a) => a.id === accountId)) return;
+  if (accountId === ALL_MAIL ? state.accounts.length < 2 : !state.accounts.some((a) => a.id === accountId)) return;
   rememberFolder();
   loadedFolder = null;
   ++prefetchRun;
+  if ($("compose-from-menu").hidden === false) closeFromMenu();
   const view = resetMailboxView();
   state.activeAccountId = accountId;
-  for (const id of ["agent-btn", "needs-you-btn", "activity-btn"]) $(id).hidden = activeAccount()?.provider === "cloud";
+  // Agent, Needs you and Activity belong to one mailbox each
+  for (const id of ["agent-btn", "needs-you-btn", "activity-btn"]) $(id).hidden = allMail() || activeAccount()?.provider === "cloud";
   state.folders = [];
   state.currentFolder = "inbox";
   state.selectedUid = null;
@@ -313,7 +495,8 @@ async function selectAccount(accountId) {
   $("read-header").style.display = "none";
   $("read-body").innerHTML = '<div id="loading">Select a message</div>';
   api.set_active_account(accountId).catch(() => {});
-  try {
+  if (accountId === ALL_MAIL) await loadAllFolders(view);
+  else try {
     const res = await api.get_folders(accountId);
     if (view !== mailboxView) return;
     state.folders = res.folders;
@@ -323,10 +506,164 @@ async function selectAccount(accountId) {
     state.folders = [{ key: "inbox", name: "Inbox", server: "INBOX", unread: 0 }];
     toast(String(e), true);
   }
+  if (view !== mailboxView) return;
   state.currentFolder = "inbox";
   renderFolders();
   if (typeof agentVisible !== "function" || !agentVisible()) await selectFolder("inbox");
-  if (state.activeAccountId === accountId) prefetchFolders(accountId);
+  if (state.activeAccountId === accountId && accountId !== ALL_MAIL) prefetchFolders(accountId);
+}
+
+/* ---------------- All mailboxes ----------------
+   Each mailbox keeps its own folders (state.accountFolders). The sidebar shows
+   them merged by kind: every Inbox is one Inbox, every Sent one Sent, and a
+   folder only some mailboxes have lists only theirs. */
+
+const STANDARD_FOLDERS = { inbox: "Inbox", sent: "Sent", drafts: "Drafts", junk: "Junk", trash: "Trash" };
+
+function mergedFolderKey(folder) {
+  return STANDARD_FOLDERS[folder.key] ? folder.key : String(folder.name || folder.key).trim().toLowerCase();
+}
+
+async function loadAllFolders(view) {
+  const results = await Promise.allSettled(state.accounts.map((a) => api.get_folders(a.id)));
+  if (view !== mailboxView) return;
+  const problems = [];
+  state.accountFolders = new Map();
+  state.accounts.forEach((a, i) => {
+    const result = results[i];
+    if (result.status === "fulfilled") {
+      state.accountFolders.set(a.id, result.value.folders || []);
+      if (result.value.error) problems.push(`${a.label}: ${result.value.error}`);
+    } else problems.push(`${a.label}: ${result.reason}`);
+  });
+  const merged = new Map();
+  for (const a of state.accounts) {
+    for (const folder of state.accountFolders.get(a.id) || []) {
+      const key = mergedFolderKey(folder);
+      if (!merged.has(key)) merged.set(key, { key, name: STANDARD_FOLDERS[key] || folder.name, server: null, unread: 0, members: [] });
+      merged.get(key).members.push({ accountId: a.id, folder });
+    }
+  }
+  if (!merged.has("inbox")) merged.set("inbox", { key: "inbox", name: "Inbox", server: null, unread: 0, members: [] });
+  state.folders = [...merged.values()];
+  sumAllMailUnread();
+  if (problems.length) toast(problems.join(" · "), true);
+}
+
+function sumAllMailUnread() {
+  for (const folder of state.folders) {
+    if (folder.members) folder.unread = folder.members.reduce((sum, m) => sum + (m.folder.unread || 0), 0);
+  }
+}
+
+// A mailbox's own folder, by its server name.
+function ownFolder(accountId, server) {
+  return (state.accountFolders.get(accountId) || []).find((f) => f.server === server) || null;
+}
+
+// Rows from one mailbox get that mailbox's id and a uid no other mailbox can
+// share; server_uid and server_folder still say where the message really is.
+function tagMessages(accountId, folder, messages) {
+  return messages.map((m) => ({ ...m, accountId, uid: accountId + "|" + m.uid,
+    server_uid: m.server_uid || m.uid, server_folder: m.server_folder || folder?.server || null,
+    validity: m.validity || folder?.validity || null }));
+}
+
+function newestFirst(messages) {
+  const when = new Map(messages.map((m) => [m, Date.parse(m.date) || 0]));
+  return messages.slice().sort((a, b) => when.get(b) - when.get(a));
+}
+
+// Read the open All mailboxes folder from every mailbox that has it (or just
+// `only` of them) and show the rows as each mailbox answers. One mailbox
+// failing never hides the others.
+async function loadAllMail({ quiet = false, join = false, background = false, only = null, retry = false } = {}) {
+  const folder = state.folders.find((f) => f.key === state.currentFolder);
+  if (!folder?.members) return;
+  const view = mailboxView;
+  if (quiet && (view.loads || view.actions)) return;
+  const key = cacheKey(ALL_MAIL, folder.key);
+  // The timer and coming back to the window read every mailbox, so they wait a
+  // minute between reads. Opening a folder and Refresh always read it.
+  if (background && Date.now() - (allMailRead.get(key) || 0) < ALL_MAIL_REFRESH_MS) return;
+  const request = ++view.requests;
+  view.loads++;
+  const stale = new Set();  // mailboxes whose read crossed a click on their own mail
+  const live = () => view === mailboxView && request === view.requests;
+  try {
+    // Keep each mailbox's rows up until its fresh read arrives.
+    const parts = new Map(folder.members.map((m) => [m.accountId, []]));
+    if (loadedFolder === key) {
+      for (const m of state.messages) parts.get(m.accountId)?.push(m);
+    } else {
+      for (const { accountId, folder: own } of folder.members) {
+        const cached = folderCache.get(cacheKey(accountId, own.key));
+        if (cached) parts.set(accountId, tagMessages(accountId, own, cached.messages));
+      }
+    }
+    const show = (final = false) => {
+      const rows = newestFirst([].concat(...parts.values()));
+      if (!final && !rows.length) return;  // "Loading…" until there is something to show
+      const scrollTop = $("msg-list").scrollTop;
+      state.messages = rows;
+      loadedFolder = key;
+      renderMessages();
+      $("msg-list").scrollTop = scrollTop;
+      sumAllMailUnread();
+      updateUnreadCount();
+    };
+    if (!quiet) show();
+    const failures = [];
+    let cloudProblem = null;
+    const members = only ? folder.members.filter((m) => only.has(m.accountId)) : folder.members;
+    await Promise.all(members.map(({ accountId, folder: own }) => readQueue(accountId)(async () => {
+      if (!live()) return;
+      const work = accountActions(accountId);
+      const epoch = work.epoch;
+      try {
+        const { res, localDrafts, cloudError } = await fetchFolder(accountId, own, { join });
+        if (!live()) return;
+        if (work.epoch !== epoch || work.active) { stale.add(accountId); return; }
+        const selected = state.messages.find((m) => m.uid === state.selectedUid);
+        if (own.validity && res.validity && own.validity !== res.validity &&
+            selected?.accountId === accountId && selected.server_folder === own.server) {
+          state.selectedUid = null;
+          messageReadRequest++;
+          $("read-header").style.display = "none";
+          $("read-body").innerHTML = '<div id="loading">Folder changed. Select a message again.</div>';
+        }
+        own.validity = res.validity || null;
+        own.unread = res.folder_unread == null ? res.unread : res.folder_unread;
+        const inbox = (state.accountFolders.get(accountId) || []).find((f) => f.key === "inbox");
+        if (inbox && res.inbox_unread != null) inbox.unread = res.inbox_unread;
+        parts.set(accountId, tagMessages(accountId, own, localDraftEnvelopes(localDrafts).concat(res.envelopes)));
+        if (cloudError) cloudProblem = cloudError;
+        if (!quiet) show();
+      } catch (e) {
+        if (!live()) return;
+        failures.push({ accountId, error: String(e) });
+        if (messageAccount({ accountId })?.provider === "cloud") cloudProblem = String(e);
+      }
+    })));
+    if (!live()) return;
+    show(true);
+    if (state.accounts.some((a) => a.provider === "cloud")) showCloudStatus(cloudProblem);
+    if (!only) allMailRead.set(key, Date.now());
+    rememberFolder();
+    if (failures.length && !quiet) {
+      const text = failures.map((f) => `${accountName(f.accountId)}: ${f.error}`).join(" · ");
+      if (!state.messages.length) $("msg-list").innerHTML = '<div class="empty">' + escapeHtml(text) + "</div>";
+      toast(text, true);
+    }
+  } finally {
+    view.loads--;
+    // A mailbox whose read crossed a click is read again once that is done: just
+    // that mailbox, and only once (after that the regular refresh catches up).
+    if (stale.size && !retry && view === mailboxView) {
+      if (view.actions) view.staleAccounts = new Set([...(view.staleAccounts || []), ...stale]);
+      else Promise.resolve().then(() => loadAllMail({ quiet: true, only: stale, retry: true }));
+    }
+  }
 }
 
 // After the Inbox is up, read the sidebar folders one at a time (Sent first) so
@@ -461,7 +798,8 @@ async function selectFolder(key) {
   document.querySelectorAll(".folder").forEach((b) =>
     b.classList.toggle("active", b.dataset.key === key));
   const folder = state.folders.find((f) => f.key === key);
-  $("search-box").placeholder = ['junk','trash'].includes(key) ? `Search ${folder?.name || key}…` : 'Search all mail…';
+  $("search-box").placeholder = ['junk','trash'].includes(key) ? `Search ${folder?.name || key}…` :
+    allMail() ? 'Search all mailboxes…' : 'Search all mail…';
   $("folder-title").textContent = folder ? folder.name : key;
   $("folder-count").textContent = "";
   if (typeof updateRescueButton === "function") updateRescueButton();
@@ -491,8 +829,9 @@ function localDraftEnvelopes(drafts) {
       : "Delivery needs checking · Open for details"}));
 }
 
-async function loadMessages({ quiet = false, join = false } = {}) {
+async function loadMessages({ quiet = false, join = false, background = false } = {}) {
   if (mailSearch) { if (!quiet) return loadSearchResults(); return; }
+  if (allMail()) return loadAllMail({ quiet, join, background });
   const folder = state.folders.find((f) => f.key === state.currentFolder);
   if (!api || !state.activeAccountId || !folder) return;
   const view = mailboxView;
@@ -569,6 +908,8 @@ function renderMessages() {
     const div = document.createElement("div");
     div.className = "msg" + (m.seen ? " seen" : " unread") + (m.uid === state.selectedUid ? " selected" : "");
     div.dataset.uid = m.uid;
+    const owner = m.accountId && state.accounts.find((a) => a.id === m.accountId);
+    const mailbox = owner ? `<span class="mbox" title="In ${escapeHtml(owner.identity || owner.label)}"><span class="acct-dot" style="background:${accountColor(owner)}"></span><span>${escapeHtml(owner.label)}</span></span>` : "";
     div.innerHTML = `
       <span class="udot"></span>
       <div class="avatar" style="background:${hashColor(m.sender)}" title="${escapeHtml(shortFrom(m.sender))}">${escapeHtml(initials(m.sender))}</div>
@@ -578,9 +919,9 @@ function renderMessages() {
           <span class="date">${fmtDate(m.date)}</span>
         </div>
         <div class="subject">${escapeHtml(m.subject)}</div>
-        <div class="snippet">${escapeHtml(m.snippet || "")}</div>
+        <div class="snippet">${mailbox}${escapeHtml(m.snippet || "")}</div>
       </div>`;
-    div.addEventListener("click", () => m.localDraftId ? resumeComposeDraft(m.localDraftId) : openMessage(m.uid, div));
+    div.addEventListener("click", () => m.localDraftId ? resumeComposeDraft(m.localDraftId, messageAccountId(m)) : openMessage(m.uid, div));
     div.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       e.stopPropagation();  // don't trigger the document-level close
@@ -623,23 +964,28 @@ async function openMessage(uid, el) {
   ++composeRequest;
   const view = mailboxView;
   const request = ++messageReadRequest;
-  const accountId = state.activeAccountId;
+  const message = state.messages.find(m => m.uid === uid);
+  const accountId = messageAccountId(message);  // the mailbox it sits in, also in All mailboxes
   state.selectedUid = uid;
   document.querySelectorAll(".msg").forEach((m) =>
     m.classList.toggle("selected", m.dataset.uid === uid));
   $("read-header").style.display = "none";
   $("read-body").innerHTML = '<div id="loading"><span class="spinner"></span> Loading…</div>';
-  const folder = messageLocation(state.messages.find(m => m.uid === uid) || {uid});
+  const folder = messageLocation(message || {uid});
   try {
-    const msg = await mailAction(() => api.get_message(accountId, folder.server, folder.uid, folder.validity));
+    const msg = await mailAction(() => api.get_message(accountId, folder.server, folder.uid, folder.validity), accountId);
     if (view !== mailboxView || request !== messageReadRequest) return;
     $("read-header").style.display = "block";
     if (typeof resetConversation === "function") resetConversation(accountId, uid, msg.threaded === false ? null : msg.message_ref);
     $("read-subject").textContent = msg.subject;
+    const owner = message?.accountId && messageAccount(message);
     $("read-meta").innerHTML =
       `<div class="sender-line">${escapeHtml(msg.sender)}</div>` +
       `<div class="meta-line"><span class="lbl">To:</span> ${escapeHtml(msg.to)}</div>` +
-      `<div class="meta-line"><span class="lbl">Date:</span> ${escapeHtml(msg.date)}</div>`;
+      `<div class="meta-line"><span class="lbl">Date:</span> ${escapeHtml(msg.date)}</div>` +
+      (owner ? `<div class="meta-line mbox-line"><span class="lbl">In:</span> <span class="acct-dot" style="background:${accountColor(owner)}"></span>` +
+        `${escapeHtml(owner.label)}${owner.identity && owner.identity !== owner.label ? ` &lt;${escapeHtml(owner.identity)}&gt;` : ""}` +
+        ` <span style="color:var(--pico-muted-color)">· replies go from this mailbox</span></div>` : "");
     $("read-body").innerHTML = "";
     if (msg.attachments && msg.attachments.length) {
       const wrap = document.createElement("div");
@@ -721,7 +1067,8 @@ async function openMessage(uid, el) {
           }
         };
         Promise.resolve().then(() => api.message_images_trusted(accountId, msg.sender,
-          state.folders.find(f => f.server === folder.server)?.key || state.currentFolder)).then(result => {
+          (allMail() ? ownFolder(accountId, folder.server) : state.folders.find(f => f.server === folder.server))?.key ||
+          state.currentFolder)).then(result => {
           if (!current() || !images.isConnected) return;
           if (result.auto) images.onclick();
           else if (result.can_trust) {
@@ -741,7 +1088,7 @@ async function openMessage(uid, el) {
     const idx = state.messages.findIndex((m) => m.uid === uid);
     const wasUnread = idx >= 0 && state.messages[idx].seen === false;
     if (idx >= 0) state.messages[idx].seen = true;
-    updateUnreadCount(wasUnread ? -1 : 0, folder.server);
+    updateUnreadCount(wasUnread ? -1 : 0, folder.server, accountId);
   } catch (e) {
     if (view !== mailboxView || request !== messageReadRequest) return;
     $("read-body").innerHTML = '<div class="empty">Failed to open message.</div>';
@@ -754,21 +1101,33 @@ async function openMessage(uid, el) {
    (reading one, marking it unread, deleting or moving an unread one). It is
    a delta, never a recount: the stored figure covers the whole folder, but
    state.messages only holds the loaded page. */
-function updateUnreadCount(delta = 0, server = null) {
-  const folder = state.folders.find((f) => server ? f.server === server : f.key === state.currentFolder);
-  if (folder && delta) folder.unread = Math.max(0, (folder.unread || 0) + delta);
+function updateUnreadCount(delta = 0, server = null, accountId = null) {
+  let folder;
+  if (allMail()) {
+    // The change belongs to one mailbox's own folder; the merged count is their sum.
+    const own = server && ownFolder(accountId, server);
+    if (own && delta) own.unread = Math.max(0, (own.unread || 0) + delta);
+    sumAllMailUnread();
+    folder = state.folders.find((f) => f.key === state.currentFolder);
+  } else {
+    folder = state.folders.find((f) => server ? f.server === server : f.key === state.currentFolder);
+    if (folder && delta) folder.unread = Math.max(0, (folder.unread || 0) + delta);
+  }
   const unread = folder && typeof folder.unread === "number"
     ? folder.unread
     : state.messages.filter((m) => !m.seen).length;
   $("folder-count").textContent = mailSearch ? `${state.messages.length} found${mailSearch.cursor ? ' · more' : ''}` : `${unread} unread · ${state.messages.length} shown`;
-  $("folder-count").title = mailSearch ? (mailSearch.serverFolder || 'All mail except Junk and Trash') : '';
+  $("folder-count").title = mailSearch ? (mailSearch.all ? (mailSearch.scope ? `${mailSearch.scope} in every mailbox` : 'Every mailbox except Junk and Trash')
+    : mailSearch.serverFolder || 'All mail except Junk and Trash') : '';
   renderFolders();  // the badge moves with the header - it used to go stale
 }
 
 /* ---------------- compose ----------------
    The compose window is BOUND to one account at open time. The From line is
    informational only - the backend derives the real identity from the account
-   id, so there is no way to send from the wrong mailbox. */
+   id, so there is no way to send from the wrong mailbox. A reply is bound to
+   the mailbox its message sits in (options.accountId), never to the view:
+   in All mailboxes there is no "open" mailbox to fall back to. */
 
 let composeAccountId = null;
 let composeRequest = 0;
@@ -778,8 +1137,13 @@ async function openCompose(to = "", subject = "", quoteHtml = "", options = {}) 
   if (composeVisible() && !(await closeCompose())) return;
   if (request !== composeRequest) return;
   if (typeof leaveAgentWorkspace === "function" && !leaveAgentWorkspace()) return;
-  const acct = activeAccount();
-  if (!acct) { toast("Add an account in Settings first", true); return; }
+  const acct = options.accountId ? state.accounts.find((a) => a.id === options.accountId) : activeAccount();
+  if (!acct) {
+    if (options.accountId) toast("That mailbox is no longer available", true);
+    else if (allMail()) openFromMenu();  // New message: choose its mailbox first
+    else toast("Add an account in Settings first", true);
+    return;
+  }
   composeAccountId = acct.id;
   startComposeSession(acct.id);
   composeSession.inReplyTo = options.in_reply_to || "";
@@ -790,7 +1154,7 @@ async function openCompose(to = "", subject = "", quoteHtml = "", options = {}) 
   $("compose-copies").open = !!(options.cc || options.bcc);
   renderComposeAttachments();
   $("compose-from").innerHTML =
-    `<span class="acct-dot" style="background:${escapeHtml(acct.color)}"></span>` +
+    `<span class="acct-dot" style="background:${accountColor(acct)}"></span>` +
     `${escapeHtml(acct.label)} &lt;${escapeHtml(acct.identity)}&gt;`;
   $("compose-to").value = to;
   $("compose-subject").value = subject;
@@ -845,7 +1209,7 @@ async function sendCompose() {
     }
     toast("Sent as " + (res.sent_as || "") + (res.sent_copy_saved === false ? "; Sent copy could not be saved" : "") +
       (res.refused_recipients?.length ? "; some recipients were rejected" : ""));
-    if (state.currentFolder === "sent" && composeAccountId === state.activeAccountId) loadMessages();
+    if (state.currentFolder === "sent" && (allMail() || composeAccountId === state.activeAccountId)) loadMessages();
   } catch (e) {
     toast("Send failed: " + e, true);
   } finally {
@@ -868,7 +1232,7 @@ async function saveDraft() {
     await persistCompose();
     hideCompose();
     toast("Draft saved on this device");
-    if (state.currentFolder === "drafts" && composeAccountId === state.activeAccountId) loadMessages();
+    if (state.currentFolder === "drafts" && (allMail() || composeAccountId === state.activeAccountId)) loadMessages();
   } catch (e) {
     toast("Could not save draft: " + e, true);
   } finally { setComposeBusy(session, false); }
@@ -1129,7 +1493,8 @@ async function reloadAccounts() {
     $("read-body").innerHTML = '<div id="loading">Select a message</div>';
     return;
   }
-  const wanted = state.accounts.some((a) => a.id === state.activeAccountId)
+  const wanted = allMail() && state.accounts.length > 1 ? ALL_MAIL
+    : state.accounts.some((a) => a.id === state.activeAccountId)
     ? state.activeAccountId
     : (data.active_account && state.accounts.some((a) => a.id === data.active_account)
         ? data.active_account : state.accounts[0].id);
@@ -1142,17 +1507,22 @@ async function init() {
     return;
   }
   await restoreRestartDrafts();
-  $("compose-btn").addEventListener("click", () => openCompose());
+  $("compose-btn").addEventListener("click", () => {
+    if (!$("compose-from-menu").hidden) closeFromMenu();
+    else openCompose();
+  });
   $("send-btn").addEventListener("click", sendCompose);
   $("draft-btn").addEventListener("click", saveDraft);
   $("cancel-btn").addEventListener("click", discardCompose);
   $("settings-btn").addEventListener("click", openSettings);
   $("account-switch").addEventListener("click", (e) => {
     e.stopPropagation();
-    if ($("accounts").hidden) openAccountMenu(); else closeAccountMenu();
+    if ($("account-menu").hidden) openAccountMenu(); else closeAccountMenu();
   });
+  $("all-mail-btn").addEventListener("click", () => { closeAccountMenu(); selectAccount(ALL_MAIL); });
   document.addEventListener("click", (e) => {
     if (!$("account-switcher").contains(e.target)) closeAccountMenu();
+    if (!$("compose-wrap").contains(e.target)) closeFromMenu();
   });
   $("cloud-settings").addEventListener("click", openSettings);
   $("cloud-owner-settings").addEventListener("click", async () => {
@@ -1190,9 +1560,9 @@ async function init() {
   $("unread-btn").addEventListener("click", markUnread);
   $("markall-btn").addEventListener("click", markAllRead);
   $("refresh-btn").addEventListener("click", () => loadMessages());
-  window.addEventListener("focus", () => loadMessages({ quiet: true }));
+  window.addEventListener("focus", () => loadMessages({ quiet: true, background: true }));
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) loadMessages({ quiet: true });
+    if (!document.hidden) loadMessages({ quiet: true, background: true });
   });
   startMailRefresh();
   $("sig-image-btn").addEventListener("click", addSigImage);
@@ -1209,7 +1579,8 @@ async function init() {
   window.addEventListener("blur", closeCtxMenu);
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
-      if (!$("accounts").hidden) { closeAccountMenu(); $("account-switch").focus(); return; }
+      if (!$("account-menu").hidden) { closeAccountMenu(); $("account-switch").focus(); return; }
+      if (!$("compose-from-menu").hidden) { closeFromMenu(); $("compose-btn").focus(); return; }
       if ($("agent-backdrop").classList.contains("show")) return;
       if ($("compose-backdrop").classList.contains("show")) { closeCompose(); return; }
       $("settings-backdrop").classList.remove("show");
@@ -1228,8 +1599,8 @@ async function init() {
     state.accounts = data.accounts;
     if (data.cloud_error) toast(data.cloud_error, true);
     applyScale(data.ui_scale || "default");
-    const startId = state.accounts.some((a) => a.id === data.active_account)
-      ? data.active_account : state.accounts[0].id;
+    const startId = data.all_mailboxes && state.accounts.length > 1 ? ALL_MAIL
+      : state.accounts.some((a) => a.id === data.active_account) ? data.active_account : state.accounts[0].id;
     await selectAccount(startId);
   } catch (e) {
     document.getElementById("msg-list").innerHTML =
@@ -1242,6 +1613,7 @@ async function init() {
 async function markAllRead() {
   if (mailSearch) return;
   const folder = state.folders.find((f) => f.key === state.currentFolder);
+  if (allMail()) return markAllMailRead(folder);
   if (!folder || !folder.server) return;
   const view = mailboxView;
   try {
@@ -1254,19 +1626,36 @@ async function markAllRead() {
   }
 }
 
+// All mailboxes: each mailbox marks its own copy of the folder.
+async function markAllMailRead(folder) {
+  const members = (folder?.members || []).filter((m) => m.folder.server);
+  if (!members.length) return;
+  const view = mailboxView;
+  const results = await Promise.allSettled(members.map(({ accountId, folder: own }) =>
+    mailAction(() => api.mark_all_read(accountId, own.server), accountId)));
+  if (view !== mailboxView) return;
+  const count = results.reduce((sum, r) => sum + (r.status === "fulfilled" ? r.value.count || 0 : 0), 0);
+  const failed = members.filter((_, i) => results[i].status === "rejected").map((m) => accountName(m.accountId));
+  if (failed.length) toast(`Marked ${count} as read; failed in ${failed.join(", ")}`, true);
+  else toast(`Marked ${count} message${count === 1 ? "" : "s"} as read`);
+  await loadMessages();
+}
+
 async function markUnread() {
   if (!state.selectedUid) return;
-  const folder = messageLocation(state.messages.find(m => m.uid === state.selectedUid));
+  const message = state.messages.find(m => m.uid === state.selectedUid);
+  const folder = messageLocation(message);
+  const accountId = messageAccountId(message);
   const view = mailboxView;
   const uid = state.selectedUid;
   try {
-    await mailAction(() => api.set_seen(state.activeAccountId, folder.server, folder.uid, false, folder.validity));
+    await mailAction(() => api.set_seen(accountId, folder.server, folder.uid, false, folder.validity), accountId);
     if (view !== mailboxView) return;
     const idx = state.messages.findIndex((m) => m.uid === uid);
     const wasRead = idx >= 0 && state.messages[idx].seen;
     if (idx >= 0) state.messages[idx].seen = false;
     renderMessages();
-    updateUnreadCount(wasRead ? 1 : 0, folder.server);
+    updateUnreadCount(wasRead ? 1 : 0, folder.server, accountId);
     toast("Marked as unread");
   } catch (e) {
     toast("Failed: " + e, true);
@@ -1276,14 +1665,15 @@ async function markUnread() {
 async function deleteSelected() {
   if (mailboxView.actions) { toast("Wait for the current mail action to finish"); return; }
   if (!state.selectedUid) return;
-  if (!confirm(activeAccount()?.provider === "cloud" ? "Move this message to Trash? You can move it back from Trash." : "Move this message to Trash? You can undo it in Activity.")) return;
-  const folder = messageLocation(state.messages.find(m => m.uid === state.selectedUid));
+  const message = state.messages.find(m => m.uid === state.selectedUid);
+  if (!confirm(messageAccount(message)?.provider === "cloud" ? "Move this message to Trash? You can move it back from Trash." : "Move this message to Trash? You can undo it in Activity.")) return;
+  const folder = messageLocation(message);
   const view = mailboxView;
   const uid = state.selectedUid;
   try {
     const gone = state.messages.find((m) => m.uid === uid);
-    const accountId = state.activeAccountId;
-    const result = await mailAction(() => api.delete_message(accountId, folder.server, folder.uid, folder.validity));
+    const accountId = messageAccountId(gone);
+    const result = await mailAction(() => api.delete_message(accountId, folder.server, folder.uid, folder.validity), accountId);
     if (result.status !== "moved") { toast(result.warning || "Filing needs checking", true); return; }
     if (view !== mailboxView) return;
     state.messages = state.messages.filter((m) => m.uid !== uid);
@@ -1295,7 +1685,7 @@ async function deleteSelected() {
       $("read-body").innerHTML = '<div id="loading">Select a message</div>';
     }
     renderMessages();
-    updateUnreadCount(gone?.seen === false ? -1 : 0, folder.server);
+    updateUnreadCount(gone?.seen === false ? -1 : 0, folder.server, accountId);
     filingToast(accountId, result, "Moved to Trash");
   } catch (e) {
     toast("Move to Trash failed: " + e, true);
@@ -1314,20 +1704,22 @@ async function forwardMessage() {
   await openCorrespondence(m, true, false);
 }
 
+// Replies and forwards come from the mailbox the message sits in: the quote is
+// read from it and the compose window is bound to it, whichever view is open.
 async function openCorrespondence(message, forward, replyAll) {
   const request = ++composeRequest;
-  const accountId = state.activeAccountId;
+  const accountId = messageAccountId(message);
   const view = mailboxView;
   const folder = messageLocation(message);
   try {
     const context = await api.get_compose_context(accountId, folder.server, folder.uid, replyAll, forward, folder.validity);
-    if (request !== composeRequest || view !== mailboxView || accountId !== state.activeAccountId || message.uid !== state.selectedUid) return;
+    if (request !== composeRequest || view !== mailboxView || messageAccountId(message) !== accountId || message.uid !== state.selectedUid) return;
     let subject = context.subject;
     if (forward ? !/^fwd?:/i.test(subject) : !/^re:/i.test(subject)) subject = (forward ? "Fwd: " : "Re: ") + subject;
     const quote = `<div><i>On ${escapeHtml(context.date)}, ${escapeHtml(shortFrom(context.sender))} wrote:</i></div>` +
       `<pre style="white-space:pre-wrap">${escapeHtml(context.text)}</pre>`;
     await openCompose(forward ? "" : context.to, subject, quote,
-      {...context, title: forward ? "Forward" : replyAll ? "Reply all" : "Reply"});
+      {...context, accountId, title: forward ? "Forward" : replyAll ? "Reply all" : "Reply"});
   } catch (error) { toast("Could not prepare message: " + error, true); }
 }
 
@@ -1335,7 +1727,7 @@ async function quoteOriginal(m) {
   // fetch the full message to quote its body
   const folder = messageLocation(m);
   try {
-    const msg = await api.get_message(state.activeAccountId, folder.server, folder.uid, folder.validity);
+    const msg = await api.get_message(messageAccountId(m), folder.server, folder.uid, folder.validity);
     // Quotes live in the editable main document, outside the reader sandbox.
     // Use escaped text so incoming HTML can never execute beside the GUI bridge.
     const src = `<pre style="white-space:pre-wrap">${escapeHtml(msg.text || "")}</pre>`;
@@ -1355,10 +1747,14 @@ function openCtxMenu(x, y, uid) {
   const menu = $("ctx-menu");
   const msg = state.messages.find((m) => m.uid === uid);
   const current = messageLocation(msg);
+  const account = messageAccount(msg);
   const sender = msg ? shortFrom(msg.sender) : "";
   const dom = msg ? (msg.sender.match(/<([^>]+)>/) || [msg.sender, msg.sender])[1].split("@")[1] || "" : "";
-  let html = `<div class="ctx-head">${escapeHtml(sender)}<br><span style="font-weight:400">${escapeHtml(dom || "")}</span></div>`;
-  state.folders.forEach((f) => {
+  let html = `<div class="ctx-head">${escapeHtml(sender)}<br><span style="font-weight:400">${escapeHtml(dom || "")}</span>` +
+    (msg?.accountId && account ? `<br><span style="font-weight:400">In ${escapeHtml(account.label)}</span>` : "") + `</div>`;
+  // Moves stay inside the message's own mailbox: its folders, never another mailbox's.
+  const targets = msg?.accountId ? state.accountFolders.get(msg.accountId) || [] : state.folders;
+  targets.forEach((f) => {
     if (!f.server || f.server === current.server) return;  // only server-side move targets
     const colors = { inbox: "#2563eb", sent: "#059669", drafts: "#d97706", junk: "#dc2626", trash: "#6b7280" };
     const color = colors[f.key] || "#8b5cf6";
@@ -1368,7 +1764,7 @@ function openCtxMenu(x, y, uid) {
     </div>`;
   });
   html += `<div class="ctx-sep"></div>
-${activeAccount()?.provider === "cloud" ? "" : '<div class="ctx-item" data-act="newfolder">📁 New folder…</div>'}
+${account?.provider === "cloud" ? "" : '<div class="ctx-item" data-act="newfolder">📁 New folder…</div>'}
     <div class="ctx-item" data-act="unread">🔵 Mark unread</div>
     <div class="ctx-item" data-act="delete" style="color:#b91c1c">🗑 Move to Trash</div>`;
   menu.innerHTML = html;
@@ -1398,8 +1794,8 @@ async function ctxMoveTo(target) {
   const view = mailboxView;
   const uid = ctxUid;
   try {
-    const accountId = state.activeAccountId;
-    const res = await mailAction(() => api.move_message(accountId, folder.server, folder.uid, target, msg.sender, false, folder.validity));
+    const accountId = messageAccountId(msg);
+    const res = await mailAction(() => api.move_message(accountId, folder.server, folder.uid, target, msg.sender, false, folder.validity), accountId);
     if (res.status !== "moved") { toast(res.warning || "Filing needs checking", true); return; }
     if (view !== mailboxView) return;
     state.messages = state.messages.filter((m) => m.uid !== uid);
@@ -1412,9 +1808,9 @@ async function ctxMoveTo(target) {
     }
     renderMessages();
     // an unread message leaves this folder's count and joins the target's
-    const dest = state.folders.find((f) => f.server === target);
+    const dest = allMail() ? ownFolder(accountId, target) : state.folders.find((f) => f.server === target);
     if (msg.seen === false && dest) dest.unread = (dest.unread || 0) + 1;
-    updateUnreadCount(msg.seen === false ? -1 : 0, folder.server);
+    updateUnreadCount(msg.seen === false ? -1 : 0, folder.server, accountId);
     if (res.learned) {
       toast(`Moved & learned: mail from ${res.learned} → ${target} from now on`);
     } else {
@@ -1426,11 +1822,13 @@ async function ctxMoveTo(target) {
 }
 
 async function ctxNewFolder() {
-  const name = prompt("New folder name:", "Marketing");
+  const account = messageAccount(state.messages.find((m) => m.uid === ctxUid));
+  if (!account) return;
+  const name = prompt(allMail() ? `New folder in ${account.label}:` : "New folder name:", "Marketing");
   if (!name || !name.trim()) return;
   try {
-    await api.create_folder(state.activeAccountId, name.trim());
-    await selectAccount(state.activeAccountId);  // reload this account's folders
+    await api.create_folder(account.id, name.trim());
+    await selectAccount(state.activeAccountId);  // reload this account's (or every mailbox's) folders
     toast(`Folder "${name.trim()}" created`);
   } catch (e) {
     toast("Create failed: " + e, true);

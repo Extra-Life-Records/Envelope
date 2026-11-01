@@ -18,7 +18,9 @@ async function loadConversation() {
   if (!view.started) $("conversation-items").textContent = "Loading conversation…";
   try {
     const result = await api.get_conversation(view.accountId, view.messageRef, view.cursor);
-    if (conversationView !== view || state.activeAccountId !== view.accountId || state.selectedUid !== view.uid) return;
+    // The open message's own mailbox (in All mailboxes that isn't the view's)
+    const open = (state.messages || []).find(message => message.uid === state.selectedUid);
+    if (conversationView !== view || (open?.accountId || state.activeAccountId) !== view.accountId || state.selectedUid !== view.uid) return;
     view.started = true;
     view.cursor = result.next_cursor;
     view.items.push(...result.items);
