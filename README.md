@@ -66,6 +66,9 @@ owner's x64 machine and is published with native x64 and ARM64 downloads.
 - ✅ Credentials protected with Windows DPAPI; settings stored locally in `%APPDATA%\SimpleMail`
 - ✅ Connection test button in Settings
 - ✅ Native ARM64 and x64 builds from the same codebase
+- ✅ **AI-native: Claude drives it through its own tools** — like Surf's browser tools, the
+  running app serves MCP tools (`simplemail`) for every mailbox it shows. See
+  [AI control](#ai-control-mcp) below
 
 **Load images** downloads bounded public raster images through the desktop app
 and displays them inside the sandbox. This also handles senders whose image
@@ -76,6 +79,40 @@ senders (rescued, let in, your own addresses) and from people this mailbox has w
 except in Junk; **Always for this sender** beside Load images adds the sender to that list,
 which travels with the mailbox to your other PCs. A cloud mailbox has its own trusted list
 (its own address plus Always for this sender), shared with your other PCs through Valet.
+
+## AI control (MCP)
+
+SimpleMail is meant to be used by an AI as well as by you, the way Surf is: Claude works
+the running app through its tools, never by clicking it with desktop control. The tools
+use the same code as the window, so they reach every mailbox the window shows (Fasthosts,
+Outlook.com and the cloud mailboxes) and what the AI changes shows up in the window.
+
+| Job | Tools |
+|---|---|
+| See what's there | `mail_accounts`, `mail_folders`, `mail_list`, `mail_unread` (every mailbox at once) |
+| Find and read | `mail_search` (every mailbox, or one), `mail_read`, `mail_thread`, `mail_attachment` (saved to Downloads\SimpleMail) |
+| Sort | `mail_mark`, `mail_move`, `mail_trash`, `mail_create_folder`, `mail_activity` + `mail_undo` |
+| Write | `mail_drafts`, `mail_draft` (new, reply, reply all, forward; adds the signature and quote), `mail_send`, `mail_discard_draft` |
+| The window | `mail_show` (open a mailbox, folder, email or draft in front of you), `mail_screen` (what the window shows) |
+| Clean up | `mail_find_real` + `mail_rescue`, `mail_senders`, `mail_clear_sender`, `mail_unsubscribe`, `mail_screener`, `mail_let_in`, `mail_rules` / `mail_rule`, `mail_trust_sender` |
+
+- Reading never marks mail read unless the AI asks (`mark_read`). Moves and Trash are
+  recoverable from Activity; nothing is deleted for good.
+- Sending is two steps: `mail_draft` saves a draft (and with `show` opens it in the window),
+  then `mail_send` sends that exact revision. Replies always go from the mailbox the email
+  is in. The tools tell the AI to send only after you've said so; email content is treated
+  as untrusted data, never as instructions.
+- **How it connects:** the app serves `POST /mcp` on `127.0.0.1:17591` next to the window's
+  files, with a bearer token kept in `%APPDATA%\SimpleMail\mcp.json`. Toolbelt registers
+  `SimpleMailAgent.exe app` as the `simplemail` server on every PC: a small bridge that
+  answers the MCP handshake itself (so a session that starts while SimpleMail is closed still
+  has the tools) and opens SimpleMail through Explorer the first time a tool is used.
+  To add it by hand: `claude mcp add --scope user simplemail -- "%LOCALAPPDATA%\Programs\SimpleMail\SimpleMailAgent.exe" app`
+  (from source: `py -3 agent_mcp.py app`).
+- A dev copy run with `SIMPLEMAIL_PORT` writes `mcp-<port>.json` instead and is reached by
+  a bridge started with the same `SIMPLEMAIL_PORT`; it never opens the installed app.
+- `agent_mcp.py serve` is a different server: one mailbox, for an unattended model working
+  an owner-written job ([AGENT.md](AGENT.md)).
 
 ## How it connects
 
@@ -189,8 +226,11 @@ cffi 2.1.1 — all installed by the workflow itself. ARM64 uses `windows-11-arm`
 
 ```
 mailapp.py            Python backend (IMAP/SMTP + pywebview bridge)
+app_mcp.py            The app's own AI tools (MCP over /mcp) and the stdio bridge
+agent_mcp.py          SimpleMailAgent.exe: the bridge (app), the scoped job agent (serve) and its workers
 web/index.html        Frontend (Pico CSS)
 web/app.js            Frontend logic
+web/mcp.js            The window's side of the AI tools (what's on screen, show this)
 web/pico.min.css      Design framework (local, no CDN)
 patch_pywebview.py    One-time pywebview/.NET Core compat patch (idempotent)
 assets/icon.ico       App icon (made with the toolbelt's icons/make.js, shared look with the other tools)

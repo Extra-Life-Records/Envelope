@@ -1,5 +1,11 @@
 # Connect an AI to a SimpleMail mailbox
 
+**Your own assistant (Claude, Codex) uses the app's own tools, `simplemail`**: the running
+app serves them for every mailbox, the way Surf serves browser tools, and Toolbelt connects
+them on every PC through `SimpleMailAgent.exe app`. See "AI control (MCP)" in the
+[README](README.md#ai-control-mcp). The rest of this page is the other kind: one mailbox handed
+to an unattended model with an owner-written job (`agent_mcp.py serve`, the built-in worker).
+
 The v1.4.1 desktop and console agent are published for Windows x64 and ARM64.
 The released x64 files are installed and checked on the owner's machine.
 Use an MCP client that supports local stdio servers. No model provider is required

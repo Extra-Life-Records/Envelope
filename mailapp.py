@@ -72,7 +72,7 @@ else:
     _WEBVIEW_IMPORT_ERROR = None
 
 APP_NAME = "SimpleMail"
-APP_VERSION = "1.9.27"
+APP_VERSION = "1.9.28"
 APP_REPO = "Extra-Life-Records/SimpleMail"  # owner/repo for auto-updates
 CONFIG_DIR = Path(os.environ.get("APPDATA", str(Path.home()))) / APP_NAME
 CONFIG_FILE = CONFIG_DIR / "config.json"
@@ -2476,6 +2476,18 @@ def main():
     index_html = (_BASE_DIR / "web" / "index.html").resolve()
     web_dir = (_BASE_DIR / "web").resolve()
 
+    # Mailboxes added on the owner's other PCs come in first, so they get a poller too (a few seconds at most).
+    syncer = AccountSyncer(cfg)
+    if not os.environ.get("SIMPLEMAIL_NO_SYNC"):   # set for a sandboxed test copy: its mailboxes stay its own
+        syncer.start()
+        syncer.first.wait(8)
+
+    api = Api(cfg)
+    api.syncer = syncer
+
+    # The window's files and the AI tools (POST /mcp, like Surf's) share one local server.
+    import app_mcp
+    tools = app_mcp.AppTools(api)
     if bottle is not None:
         @bottle.get("/")
         def _index():
@@ -2490,22 +2502,11 @@ def main():
         server.route("/", "GET", _index)
         server.route("/<filename:path>", "GET", _static)
         port = int(os.environ.get("SIMPLEMAIL_PORT", "17591"))  # override to run a dev copy alongside
-        threading.Thread(
-            target=lambda: server.run(host="127.0.0.1", port=port, quiet=True),
-            daemon=True,
-        ).start()
+        exe = _frozen_exe_path()
+        app_mcp.serve(server, tools, port, APP_VERSION, exe=str(exe) if exe else None)
         url = f"http://127.0.0.1:{port}"
     else:
         url = str(index_html)
-
-    # Mailboxes added on the owner's other PCs come in first, so they get a poller too (a few seconds at most).
-    syncer = AccountSyncer(cfg)
-    if not os.environ.get("SIMPLEMAIL_NO_SYNC"):   # set for a sandboxed test copy: its mailboxes stay its own
-        syncer.start()
-        syncer.first.wait(8)
-
-    api = Api(cfg)
-    api.syncer = syncer
     icon_path = _BASE_DIR / "assets" / "icon.ico"
     placement_file = CONFIG_DIR / "window.json"
     placement = load_placement(placement_file)
@@ -2541,6 +2542,7 @@ def main():
                 )
                 global _API_WINDOW
                 _API_WINDOW = window  # lets Api.pick_image open a file dialog
+                tools.window = window  # lets the AI tools show things in it
                 if os.name == "nt":
                     window.events.shown += lambda: remember_window(window, placement_file, placement)
                 # Title-bar icon (pywebview 5.x has no icon kwarg; set it on

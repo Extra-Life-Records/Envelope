@@ -54,6 +54,17 @@ with tempfile.TemporaryDirectory(prefix='simplemail-installed-agent-') as root:
     names = {item['name'] for item in replies[1]['result']['tools']}
     assert 'mailbox_work_next' in names and 'mailbox_send' not in names
     assert replies[3]['result']['structuredContent']['items'] == []
+    # The owner's AI bridge answers the handshake with no app running, and on a dev port never opens one.
+    bridge = subprocess.run([str(exe), 'app'], input=''.join(json.dumps(item) + '\n' for item in [
+        {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'protocolVersion': '2025-06-18'}},
+        {'jsonrpc': '2.0', 'id': 2, 'method': 'tools/list'},
+        {'jsonrpc': '2.0', 'id': 3, 'method': 'tools/call', 'params': {'name': 'mail_accounts', 'arguments': {}}}]),
+        capture_output=True, text=True, encoding='utf-8', env={**env, 'SIMPLEMAIL_PORT': '1'}, timeout=45)
+    assert bridge.returncode == 0, bridge.stderr
+    answers = {reply['id']: reply for reply in map(json.loads, bridge.stdout.splitlines())}
+    assert answers[1]['result']['serverInfo']['name'] == 'simplemail'
+    assert {'mail_send', 'mail_show', 'mail_search'} <= {item['name'] for item in answers[2]['result']['tools']}
+    assert answers[3]['result']['isError'] and 'port 1' in answers[3]['result']['content'][0]['text']
     paused = json.loads(command('pause', 'fixture'))
     assert not paused['enabled']
     result = json.loads(command('run', '--account', 'fixture', '--endpoint',
@@ -76,7 +87,8 @@ with tempfile.TemporaryDirectory(prefix='simplemail-installed-agent-') as root:
         control.stop('fixture')
         process.wait(timeout=15)
     assert process.returncode == 0 and control.state('fixture')['status'] == 'stopped'
-    print(json.dumps({'packaged_agent': True, 'architecture': args.arch, 'stdio_protocol': True, 'identity_scoped': True,
+    print(json.dumps({'packaged_agent': True, 'architecture': args.arch, 'stdio_protocol': True, 'app_bridge': True,
+        'identity_scoped': True,
         'draft_store': True, 'pause': True, 'model_worker_imports': True,
         'managed_worker_start_pause': True, 'live_mail_or_provider_requests': False, 'passed': True}))
 

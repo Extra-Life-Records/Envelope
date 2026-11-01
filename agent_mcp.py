@@ -3,6 +3,7 @@
 Owner setup: py -3 agent_mcp.py assign ACCOUNT --job "Your job"
 Agent access: py -3 agent_mcp.py serve --account ACCOUNT
 Pause:       py -3 agent_mcp.py pause ACCOUNT
+Owner's AI:  py -3 agent_mcp.py app   (the running app's own tools, see app_mcp.py)
 """
 import argparse
 import json
@@ -281,6 +282,7 @@ def main(argv=None):
     pause = commands.add_parser("pause", help="Owner: pause agent access")
     pause.add_argument("account")
     commands.add_parser("accounts", help="Owner: list mailbox IDs without credentials")
+    commands.add_parser("app", help="Owner's AI: connect to the running SimpleMail app, opening it when needed")
     managed = commands.add_parser("managed", help="Internal: run the owner's saved model connection")
     managed.add_argument("--account", required=True)
     managed.add_argument("--token", required=True)
@@ -288,8 +290,11 @@ def main(argv=None):
     # Avoid ever importing the GUI before stdout is reserved for the protocol.
     from contextlib import redirect_stdout
     with redirect_stdout(sys.stderr):
-        from mailapp import CONFIG_FILE, CONFIG_DIR
+        from mailapp import CONFIG_FILE, CONFIG_DIR, APP_VERSION
         cfg = LiveConfig(CONFIG_FILE)
+    if args.command == "app":
+        from app_mcp import bridge_main
+        return bridge_main(APP_VERSION)
     if args.command == "accounts":
         print(json.dumps([{"id": a["id"], "label": a["label"],
                            "address": a.get("from_email") or a["email"]} for a in cfg.accounts()]))
