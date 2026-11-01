@@ -40,10 +40,23 @@
   #brand svg { vertical-align: -3px; margin-right: 6px; }
   #compose-btn {
     width: 100%;
-    margin-bottom: 14px;
+    margin-bottom: 0;
     border-radius: 999px;
     font-weight: 600;
   }
+  /* New message from All mailboxes asks which mailbox it is from, before anything is written */
+  #compose-wrap { position: relative; margin-bottom: 14px; }
+  .drop-menu {
+    position: absolute; left: 0; z-index: 50;
+    min-width: 100%; width: max-content; max-width: 340px;
+    max-height: 60vh; overflow-y: auto; display: flex; flex-direction: column; gap: 2px;
+    padding: 6px; background: #fff; border: 1px solid var(--pico-muted-border-color);
+    border-radius: 10px; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.18);
+  }
+  .drop-menu[hidden] { display: none; }
+  .drop-menu .menu-head { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+    color: var(--pico-muted-color); padding: 4px 12px 6px; }
+  #compose-from-menu { top: calc(100% + 6px); z-index: 60; }
   .folder {
     display: flex;
     align-items: center;
@@ -98,14 +111,10 @@
   #account-switch .acct-label { flex: 1; min-width: 0; }
   #account-switch .chevron { flex-shrink: 0; color: #6b7280; transition: transform 0.15s; }
   #account-switch[aria-expanded="true"] .chevron { transform: rotate(180deg); }
-  #accounts {
-    position: absolute; left: 0; bottom: calc(100% + 6px); z-index: 50;
-    min-width: 100%; width: max-content; max-width: 340px;
-    max-height: 60vh; overflow-y: auto; display: flex; flex-direction: column; gap: 2px;
-    padding: 6px; background: #fff; border: 1px solid var(--pico-muted-border-color);
-    border-radius: 10px; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.18);
-  }
-  #accounts[hidden] { display: none; }
+  #account-menu { bottom: calc(100% + 6px); }
+  #accounts { display: flex; flex-direction: column; gap: 2px; }
+  #all-mail-btn:not([hidden]) + #accounts { border-top: 1px solid var(--pico-muted-border-color); margin-top: 4px; padding-top: 6px; }
+  .account[hidden] { display: none; }
   .account {
     display: flex; align-items: center; gap: 9px;
     padding: 7px 12px; border-radius: 8px;
@@ -248,6 +257,12 @@
   }
   .msg.unread .subject { font-weight: 600; }
   .msg .snippet { font-size: 0.78rem; color: var(--pico-muted-color); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* All mailboxes: which mailbox each message sits in (replies go from that one) */
+  .msg .mbox { display: inline-flex; align-items: center; gap: 5px; max-width: 60%; margin-right: 6px;
+    font-weight: 600; color: #475569; vertical-align: -1px; }
+  .msg .mbox .acct-dot { width: 7px; height: 7px; min-width: 7px; }
+  .msg .mbox span:last-child { overflow: hidden; text-overflow: ellipsis; }
+  #read-meta .mbox-line .acct-dot { width: 8px; height: 8px; min-width: 8px; margin-right: 4px; }
   .msg.seen .subject, .msg.seen .snippet { color: #6b7280; }
   .empty {
     padding: 40px 20px;
@@ -528,7 +543,13 @@
       </svg>
       SimpleMail
     </div>
-    <button id="compose-btn" class="contrast">+  New message</button>
+    <div id="compose-wrap">
+      <button id="compose-btn" class="contrast" aria-controls="compose-from-menu">+  New message</button>
+      <div id="compose-from-menu" class="drop-menu" role="menu" aria-label="Send from" hidden>
+        <div class="menu-head">Send from</div>
+        <div id="compose-from-list"></div>
+      </div>
+    </div>
 
     <div id="cloud-status" role="status" hidden>
       <span id="cloud-status-message"></span>
@@ -555,8 +576,11 @@
         Settings
       </button>
       <div id="account-switcher">
-        <div id="accounts" aria-label="Mailboxes" hidden></div>
-        <button type="button" id="account-switch" aria-expanded="false" aria-controls="accounts"></button>
+        <div id="account-menu" class="drop-menu" hidden>
+          <button type="button" class="account" id="all-mail-btn" title="Every mailbox as one. Replies go from the mailbox each message is in." hidden></button>
+          <div id="accounts" aria-label="Mailboxes"></div>
+        </div>
+        <button type="button" id="account-switch" aria-expanded="false" aria-controls="account-menu"></button>
       </div>
     </div>
   </aside>
