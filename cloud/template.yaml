@@ -104,6 +104,26 @@ Parameters:
     Default: ''
     AllowedPattern: '^(arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[A-Za-z0-9/_+=.@-]+)?$'
     Description: ARN of the owner-created secret holding the Fasthosts logins for the reader (see README). Empty = AWS mailboxes only.
+  NotifyEnabled:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Let the AI connection email triage reports to the owner's own fixed addresses (NotifyTo). It can never choose a recipient.
+  NotifyTo:
+    Type: String
+    Default: ''
+    AllowedPattern: '^([^,@\s]+@[^,@\s]+(,[^,@\s]+@[^,@\s]+)*)?$'
+    Description: Comma-separated owner addresses that receive triage reports (must be SES-verified while SES is in the sandbox).
+  NotifyFrom:
+    Type: String
+    Default: ''
+    AllowedPattern: '^([^,@\s]+@[^,@\s]+)?$'
+    Description: Sender address for triage reports, on the verified sending domain (e.g. triage@extraliferecords.com).
+  TriageFireEnabled:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Fire the owner's Claude triage routine (API trigger) when new mail arrives. Fill the TriageFireSecret first.
 Globals:
   Function:
     Runtime: python3.12
@@ -128,6 +148,8 @@ Conditions:
   WebCallbackConfigured: !Not [!Equals [!Ref CallbackUrl, 'http://localhost:8765/callback']]
   NewSendingIdentity: !Equals [!Ref CreateSendingIdentity, 'true']
   ReaderOn: !Equals [!Ref ReaderEnabled, 'true']
+  NotifyOn: !And [!Condition McpOn, !Equals [!Ref NotifyEnabled, 'true']]
+  TriageFireOn: !Equals [!Ref TriageFireEnabled, 'true']
   ExternalOn: !And [!Condition ReaderOn, !Not [!Equals [!Ref ExternalMailboxesSecret, '']]]
 Resources:
   MailBucket:
@@ -477,6 +499,9 @@ Resources:
           AI_SENDING_ENABLED: !Ref AiSendingEnabled
           SENDING_ENABLED: !Ref SendingEnabled
           CONFIGURATION_SET: !Ref SendingConfiguration
+          NOTIFY_ENABLED: !If [NotifyOn, 'true', 'false']
+          NOTIFY_TO: !Ref NotifyTo
+          NOTIFY_FROM: !Ref NotifyFrom
       Policies:
         - Statement:
             - Effect: Allow
@@ -502,6 +527,21 @@ Resources:
               Condition:
                 StringLike:
                   ses:FromAddress: [!Sub 'one@${Domain}', !Sub 'two@${Domain}', !Sub 'three@${Domain}', !Sub 'four@${Domain}', !Sub 'five@${Domain}']
+        - !If
+          - NotifyOn
+          - Statement:
+              # Triage reports: one fixed sender, only to the owner's own addresses.
+              - Effect: Allow
+                Action: ses:SendEmail
+                Resource:
+                  - !Sub 'arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/${Domain}'
+                  - !Sub 'arn:aws:ses:${AWS::Region}:${AWS::AccountId}:configuration-set/${SendingConfiguration}'
+                Condition:
+                  StringEquals:
+                    ses:FromAddress: !Ref NotifyFrom
+                  ForAllValues:StringEquals:
+                    ses:Recipients: !Split [',', !Ref NotifyTo]
+          - !Ref 'AWS::NoValue'
         - !If
           - McpExternalOn
           - Statement:
@@ -629,6 +669,37 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy: {TableName: !Ref MailTable}
         - S3ReadPolicy: {BucketName: !Ref MailBucket}
+      Events:
+        Received: {Type: SNS, Properties: {Topic: !Ref ReceiveTopic}}
+  TriageFireSecret:
+    Type: AWS::SecretsManager::Secret
+    Condition: TriageFireOn
+    Properties:
+      Description: 'Claude triage routine API trigger: {"trigger_id": "trig_...", "token": "sk-ant-oat01-..."} (generated once in claude.ai/code/routines)'
+      SecretString: '{"trigger_id": "", "token": ""}'
+  TriageFireFunction:
+    Type: AWS::Serverless::Function
+    Condition: TriageFireOn
+    Properties:
+      Handler: triage_fire.handler
+      Timeout: 20
+      Environment:
+        Variables:
+          TRIAGE_FIRE_ENABLED: 'true'
+          TRIAGE_FIRE_SECRET: !Ref TriageFireSecret
+          TRIAGE_DEBOUNCE_SECONDS: '300'
+          TRIAGE_IGNORE_SENDERS: !Ref NotifyFrom
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:UpdateItem
+              Resource: !GetAtt MailTable.Arn
+              Condition:
+                ForAllValues:StringEquals:
+                  dynamodb:LeadingKeys: ['TRIAGE']
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref TriageFireSecret
       Events:
         Received: {Type: SNS, Properties: {Topic: !Ref ReceiveTopic}}
   Rules:

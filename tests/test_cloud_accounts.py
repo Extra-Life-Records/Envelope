@@ -51,6 +51,12 @@ class UnifiedInboxTests(unittest.TestCase):
         self.api.save_config(self.api.get_config())   # Settings > Save keeps it
         self.assertEqual(self.cfg.data['cloud_trusted'], {'one@extraliferecords.com': ['sarah@sky.com']})
 
+    def test_cloud_mailbox_folders_can_be_created(self):
+        self.transport.cloud_request.return_value = {'folders': ['Inbox', 'Sent', 'Drafts', 'Junk', 'Trash', 'Promotions'], 'created': True}
+        self.assertEqual(self.api.create_folder('cloud:one', 'Promotions'), {'ok': True})
+        self.transport.cloud_request.assert_called_once_with('POST', '/mailboxes/one/folders', {'name': 'Promotions'})
+        self.assertIn('Promotions', [f['name'] for f in self.provider.get_folders('cloud:one')['folders']])
+
     def test_all_accounts_share_config_without_persisting_cloud_as_imap(self):
         cfg = self.api.get_config()
         self.assertEqual(len(cfg['accounts']), 6)

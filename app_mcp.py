@@ -112,7 +112,7 @@ TOOLS = [
     tool("mail_undo", "Put moved or trashed emails back where they were.",
          {"account": ACCOUNT, "action_ids": {"type": "array", "items": STRING, "minItems": 1, "maxItems": 500}},
          ("account", "action_ids"), writes=True),
-    tool("mail_create_folder", "Create a folder in a mailbox (cloud mailboxes have fixed folders).",
+    tool("mail_create_folder", "Create a folder in a mailbox.",
          {"account": ACCOUNT, "name": STRING}, ("account", "name"), writes=True),
     tool("mail_drafts", "Drafts saved in Envelope for a mailbox (the owner's and yours), with the "
          "revision mail_draft and mail_send need.", {"account": ACCOUNT}, ("account",)),

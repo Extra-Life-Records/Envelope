@@ -232,5 +232,7 @@ class CloudAccounts:
         return self.send_compose_draft(account, draft['id'], draft['revision'])
 
     def create_folder(self, account, name):
-        raise ValueError('This mailbox supports Inbox, Sent, Drafts, Junk and Trash.')
+        result = self.request(account, 'POST', '/folders', {'name': name})
+        self.accounts[account]['folders'] = result['folders']
+        return {'ok': True}
 

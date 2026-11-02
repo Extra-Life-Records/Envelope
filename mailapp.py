@@ -72,7 +72,7 @@ else:
     _WEBVIEW_IMPORT_ERROR = None
 
 APP_NAME = "Envelope"   # the name the owner sees; it was SimpleMail until 1.9.30
-APP_VERSION = "1.9.31"
+APP_VERSION = "1.9.32"
 APP_REPO = "Extra-Life-Records/Envelope"  # owner/repo for auto-updates
 # (1.9.30 and older ask for Extra-Life-Records/SimpleMail: GitHub redirects the renamed repo, so they still update)
 # Only the visible name changed. The settings folder, the exe and release file names, the tools' id

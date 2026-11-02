@@ -65,8 +65,30 @@ def mailbox_address(name):
     return mailboxes.registry()[name]['address']
 
 
+MAX_CUSTOM_FOLDERS = 50
+
+
 def mailbox_folders(item):
-    return list(dict.fromkeys([*FOLDERS, *item.get('import_folders', [])]))
+    return list(dict.fromkeys([*FOLDERS, *item.get('import_folders', []), *item.get('custom_folders', [])]))
+
+
+def create_folder(table, item, name):
+    """Add an owner folder (Promotions, Updates...) to a mailbox. Idempotent."""
+    if not isinstance(name, str) or not mailboxes.folder(name.strip()) or len(name.strip()) > 100 or name.strip() == 'All':
+        raise ValueError('Give the folder a name of up to 100 characters')
+    name = name.strip()
+    folders = mailbox_folders(item)
+    if any(existing.casefold() == name.casefold() for existing in folders):
+        return {'folders': folders, 'created': False}
+    if len(item.get('custom_folders', [])) >= MAX_CUSTOM_FOLDERS: raise ValueError('A mailbox can have at most 50 folders of its own')
+    try:
+        table.update_item(Key={'pk': item['pk'], 'sk': 'META'},
+                          UpdateExpression='SET custom_folders = list_append(if_not_exists(custom_folders, :empty), :new)',
+                          ConditionExpression='generation = :generation AND (attribute_not_exists(custom_folders) OR NOT contains(custom_folders, :name))',
+                          ExpressionAttributeValues={':empty': [], ':new': [name], ':generation': item['generation'], ':name': name})
+    except ClientError as exc:
+        if exc.response['Error']['Code'] != 'ConditionalCheckFailedException': raise
+    return {'folders': mailbox_folders({**item, 'custom_folders': [*item.get('custom_folders', []), name]}), 'created': True}
 
 
 def authorize(table, name, subject):
@@ -407,6 +429,8 @@ def dispatch(table, s3, ses, subject, method, path, data, query):
     tail = parts[2:]
     if tail == ['folders'] and method == 'GET':
         return {'folders': mailbox_folders(item)}
+    if tail == ['folders'] and method == 'POST':
+        return create_folder(table, item, data.get('name'))
     if len(tail) == 2 and tail[0] == 'sends' and method == 'GET':
         if not re.fullmatch(r'[a-zA-Z0-9_-]{16,80}', tail[1]): raise ValueError('Invalid send ID')
         row = table.get_item(Key={'pk': pk, 'sk': 'SEND#' + tail[1]}, ConsistentRead=True).get('Item')
