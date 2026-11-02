@@ -540,7 +540,7 @@ class BridgeTests(unittest.TestCase):
                                   {"jsonrpc": "2.0", "id": 5, "method": "tools/call",
                                    "params": {"name": "mail_accounts", "arguments": {}}})
         self.assertTrue(replies[0]["result"]["isError"])
-        self.assertIn("restart SimpleMail", replies[0]["result"]["content"][0]["text"])
+        self.assertIn("restart Envelope", replies[0]["result"]["content"][0]["text"])
 
     def test_dev_port_never_opens_the_installed_app(self):
         launch = Mock()

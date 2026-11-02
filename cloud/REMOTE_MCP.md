@@ -1,6 +1,6 @@
-# SimpleMail remote AI access
+# Envelope remote AI access
 
-The existing cloud mailbox service now has a provider-neutral, stateless Streamable HTTP MCP endpoint at `/mcp`. It supports mailbox listing, search, message and attachment reading, shared plain-text drafts, and sending only an exact revision approved in the owner's SimpleMail web screen. It runs without the desktop PC. This does not require Claude-specific client software.
+The existing cloud mailbox service now has a provider-neutral, stateless Streamable HTTP MCP endpoint at `/mcp`. It supports mailbox listing, search, message and attachment reading, shared plain-text drafts, and sending only an exact revision approved in the owner's Envelope web screen. It runs without the desktop PC. This does not require Claude-specific client software.
 
 ## Rollout
 
@@ -21,7 +21,7 @@ The remote client cannot call the owner approval API: that API additionally requ
 ## Acceptance checks
 
 1. Connect two different MCP clients through their ordinary OAuth flow. Verify the same explicit grants work from a cloud client with the PC shut down. Verify the other client and another account cannot see ungranted mailboxes.
-2. Search an existing mailbox, paginate, read an attachment, and confirm reads do not mark messages as read. Save a draft; find it in the ordinary SimpleMail Drafts folder.
+2. Search an existing mailbox, paginate, read an attachment, and confirm reads do not mark messages as read. Save a draft; find it in the ordinary Envelope Drafts folder.
 3. Review an exact message in the owner screen. Changing recipients, body or attachments must prevent its earlier approval from sending. Revocation must also block it.
 4. Only with an explicitly approved recipient/message, send the approved reference once and read the outcome. `accepted` means provider acceptance, not recipient delivery. Native SES delivery events reconcile the receipt. External SMTP has no delivery receipt here. A timeout remains `uncertain` and cannot cause an automatic second send; inspect provider/Sent evidence before taking another action.
 5. Disconnect the client and verify subsequent tools fail. Keep MFA, login confirmation, CAPTCHA and social signup verification in the owner's normal sign-in flow.

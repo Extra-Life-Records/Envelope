@@ -1,4 +1,11 @@
-# SimpleMail — a beautiful, minimal Fasthosts mail app for Windows
+# Envelope — a beautiful, minimal Fasthosts mail app for Windows
+
+Envelope was called **SimpleMail** until v1.9.30. Only the name you see changed: the files
+and folders behind it keep the old name, so every PC keeps its mailboxes and keeps updating.
+That is `SimpleMail.exe` and `SimpleMailAgent.exe` in `%LOCALAPPDATA%\Programs\SimpleMail`,
+the settings in `%APPDATA%\SimpleMail`, the release downloads (`SimpleMail-<arch>.exe`), the
+AI tools' id (`simplemail`), the taskbar identity (`SimpleMail.App`), the `SIMPLEMAIL_*`
+variables and this repository's name.
 
 A small native Windows email app so you can read and send mail from your
 Fasthosts mailbox **without logging into webmail.fasthosts.co.uk**.
@@ -26,7 +33,7 @@ owner's x64 machine and is published with native x64 and ARM64 downloads.
   Reading, replying, forwarding, drafts, moving, Move to Trash and Mark unread always use that message's own
   mailbox (a reply is from that address, never another), and right-click only offers that mailbox's folders.
   New message asks which mailbox it is from. Search covers every mailbox. One mailbox failing only hides its own
-  mail. SimpleMail reopens on All mailboxes if that is where you left it. The agent, Needs you, Activity, Rescue and
+  mail. Envelope reopens on All mailboxes if that is where you left it. The agent, Needs you, Activity, Rescue and
   Clean up stay per mailbox. Cloud mailboxes now each get their own colour dot
 - ✅ **Real HTML email rendering** (sandboxed; remote images blocked until Load images, except from trusted senders
   and people you've written to)
@@ -54,7 +61,7 @@ owner's x64 machine and is published with native x64 and ARM64 downloads.
 - ✅ Mail refreshes every 30 seconds and when returning to the app, preserving
   the open email, search and message-list scroll position
 - ✅ **Rescue real mail from Junk** — open Junk (or Trash) and press the life-ring
-  button. SimpleMail ticks mail from people you've emailed or senders you trust,
+  button. Envelope ticks mail from people you've emailed or senders you trust,
   lists replies and personal addresses as "maybe", and moves your pick to a
   **Rescued** folder (Undo in Activity). Their senders are trusted from then on.
   Judged by the sender's address, never the display name.
@@ -66,7 +73,7 @@ owner's x64 machine and is published with native x64 and ARM64 downloads.
 - ✅ **Screener** — switch it on in the Inbox's senders panel. New Inbox mail from
   anyone you haven't written to or let in moves to a **Screener** folder (and makes no
   notification). Open Screener's senders panel and press **Let in** to trust a sender and
-  move its mail back. Works while SimpleMail is open; older mail is left alone.
+  move its mail back. Works while Envelope is open; older mail is left alone.
 - ✅ **Outlook.com / Hotmail / Live mailboxes** — Settings → + Add Microsoft account signs in
   with Microsoft (Microsoft no longer accepts passwords for these mailboxes). Outlook's server
   only searches plain letters, so words with accents or symbols such as é or £ can't be searched there
@@ -89,7 +96,7 @@ which travels with the mailbox to your other PCs. A cloud mailbox has its own tr
 
 ## AI control (MCP)
 
-SimpleMail is meant to be used by an AI as well as by you, the way Surf is: Claude works
+Envelope is meant to be used by an AI as well as by you, the way Surf is: Claude works
 the running app through its tools, never by clicking it with desktop control. The tools
 use the same code as the window, so they reach every mailbox the window shows (Fasthosts,
 Outlook.com and the cloud mailboxes) and what the AI changes shows up in the window.
@@ -97,7 +104,7 @@ Outlook.com and the cloud mailboxes) and what the AI changes shows up in the win
 | Job | Tools |
 |---|---|
 | See what's there | `mail_accounts`, `mail_folders`, `mail_list`, `mail_unread` (every mailbox at once) |
-| Find and read | `mail_search` (every mailbox, or one), `mail_read`, `mail_thread`, `mail_attachment` (saved to Downloads\SimpleMail) |
+| Find and read | `mail_search` (every mailbox, or one), `mail_read`, `mail_thread`, `mail_attachment` (saved to Downloads\Envelope) |
 | Sort | `mail_mark`, `mail_move`, `mail_trash`, `mail_create_folder`, `mail_activity` + `mail_undo` |
 | Write | `mail_drafts`, `mail_draft` (new, reply, reply all, forward; adds the signature and quote), `mail_send`, `mail_discard_draft` |
 | The window | `mail_show` (open a mailbox, folder, email or draft in front of you), `mail_screen` (what the window shows) |
@@ -112,8 +119,8 @@ Outlook.com and the cloud mailboxes) and what the AI changes shows up in the win
 - **How it connects:** the app serves `POST /mcp` on `127.0.0.1:17591` next to the window's
   files, with a bearer token kept in `%APPDATA%\SimpleMail\mcp.json`. Toolbelt registers
   `SimpleMailAgent.exe app` as the `simplemail` server on every PC: a small bridge that
-  answers the MCP handshake itself (so a session that starts while SimpleMail is closed still
-  has the tools) and opens SimpleMail through Explorer the first time a tool is used.
+  answers the MCP handshake itself (so a session that starts while Envelope is closed still
+  has the tools) and opens Envelope through Explorer the first time a tool is used.
   To add it by hand: `claude mcp add --scope user simplemail -- "%LOCALAPPDATA%\Programs\SimpleMail\SimpleMailAgent.exe" app`
   (from source: `py -3 agent_mcp.py app`).
 - A dev copy run with `SIMPLEMAIL_PORT` writes `mcp-<port>.json` instead and is reached by
@@ -189,11 +196,11 @@ Prints IMAP + SMTP connection results — handy for debugging.
 
 ## Auto-update & distribution
 
-SimpleMail remembers its window size, position and maximized state on this device.
+Envelope remembers its window size, position and maximized state on this device.
 The first launch opens maximized. If a monitor is disconnected, the window returns
 to an available screen. Minimizing does not change how it opens next time.
 
-SimpleMail distributes itself through **GitHub releases**:
+Envelope distributes itself through **GitHub releases**:
 
 - Repo: https://github.com/Extra-Life-Records/SimpleMail
 - Each release carries desktop and console agent executables for x64 and ARM64:
@@ -223,7 +230,7 @@ publication or installation. Replacement mailbox sending remains disabled.
    the executable headers and runs an isolated console-agent smoke check before
    publishing a release with all four downloads.
 4. Verify the published downloads and the installed app before claiming delivery.
-   Machines running an older SimpleMail version see the update on next launch.
+   Machines running an older version see the update on next launch.
 
 Requirements for the x64 GitHub build (runs on `windows-latest`):
 Python 3.12, pyinstaller, pywebview 5.3.2, pythonnet 3.0.5, bottle, pillow,

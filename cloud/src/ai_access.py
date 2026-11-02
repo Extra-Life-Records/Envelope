@@ -69,7 +69,7 @@ def save_draft(table, s3, subject, client, name, data):
     if len(request) < 16: raise ValueError('Use a unique request_id of at least 16 characters')
     content = service.validate_draft(data)
     # The existing robot-draft writers deliberately limit drafts to To/Cc and text.
-    if content['bcc'] or content['attachments']: raise ValueError('AI draft creation supports To, Cc and text; add attachments in SimpleMail before approval')
+    if content['bcc'] or content['attachments']: raise ValueError('AI draft creation supports To, Cc and text; add attachments in Envelope before approval')
     reference = digest([client, name, request])[:32]
     key = {'pk': 'AI#' + subject, 'sk': 'DRAFT#' + reference}
     payload_hash = digest({**content, 'reply_to_id': data.get('reply_to_id')})
@@ -110,7 +110,7 @@ def draft_snapshot(table, s3, subject, reference):
         msg = message_from_bytes(raw, policy=default)
         content = {field: str(msg.get(field, '')) for field in ('to', 'cc', 'bcc', 'subject')}
         body = msg.get_body(preferencelist=('plain',))
-        if body is None: raise ValueError('Review and save a plain-text draft in SimpleMail first')
+        if body is None: raise ValueError('Review and save a plain-text draft in Envelope first')
         content['body'] = body.get_content()
         content['attachments'] = [{'name': part.get_filename() or 'attachment', 'data': base64.b64encode(part.get_payload(decode=True) or b'').decode()} for part in msg.iter_attachments()]
         revision = hashlib.sha256(raw).hexdigest()

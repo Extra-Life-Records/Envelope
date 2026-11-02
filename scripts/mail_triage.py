@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SimpleMail triage agent — read-only filing of the Fasthosts/livemail inbox.
+"""Envelope triage agent — read-only filing of the Fasthosts/livemail inbox.
 
 Classifies NEW mail since the last run into:
   JUNK      -> moved to the server Junk folder
@@ -28,7 +28,7 @@ import sys
 from email import message_from_bytes, message_from_string
 from email.policy import default as email_policy
 
-APP_NAME = "SimpleMail"
+APP_NAME = "SimpleMail"   # the settings folder keeps the old name (the app is Envelope)
 BASE_DIR = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), APP_NAME)
 CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
 AGENT_DIR = os.path.join(BASE_DIR, "agent")

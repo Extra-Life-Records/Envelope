@@ -1,4 +1,4 @@
-/* The window's side of SimpleMail's AI tools (app_mcp.py): say what the window shows, and open
+/* The window's side of Envelope's AI tools (app_mcp.py): say what the window shows, and open
    what the AI puts in front of the owner, through the same functions the owner's clicks use. */
 "use strict";
 
@@ -46,7 +46,7 @@ async function mcpShow(target) {
     if (wanted && wanted !== state.activeAccountId) {
       await selectAccount(wanted);
       if (state.activeAccountId !== wanted) return {error: wanted === ALL_MAIL ? "All mailboxes needs two or more mailboxes"
-        : "SimpleMail couldn't switch mailbox: is a draft open that can't be saved?"};
+        : "Envelope couldn't switch mailbox: is a draft open that can't be saved?"};
     }
     if (target.folder) {
       const want = String(target.folder).toLowerCase();

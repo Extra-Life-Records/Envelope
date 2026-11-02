@@ -1,4 +1,4 @@
-# SimpleMail companion scripts
+# Envelope companion scripts
 
 Standalone Python scripts that run **on the Pi** (`openclaw-pi.local`, hostname
 `collector-runner`) as Hermes cron jobs — NOT inside the desktop app. They are

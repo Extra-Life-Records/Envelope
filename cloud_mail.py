@@ -1,4 +1,4 @@
-"""SimpleMail AWS adapter. Cognito sessions only; never stores AWS credentials."""
+"""Envelope AWS adapter. Cognito sessions only; never stores AWS credentials."""
 import base64
 import hashlib
 import json
@@ -163,7 +163,7 @@ class CloudMail:
                 self.send_response(200 if valid else 400)
                 self.send_header('Content-Type', 'text/plain')
                 self.send_header('Cache-Control', 'no-store'); self.end_headers()
-                self.wfile.write(b'Signed in. Return to SimpleMail.' if valid else b'Invalid sign-in callback.')
+                self.wfile.write(b'Signed in. Return to Envelope.' if valid else b'Invalid sign-in callback.')
         with HTTPServer(('127.0.0.1', 8765), Callback) as server:
             server.timeout = 1
             webbrowser.open(cfg['auth_url'] + '/oauth2/authorize?' + urlencode({

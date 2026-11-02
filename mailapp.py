@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SimpleMail - a minimal, beautiful IMAP/SMTP mail client for Fasthosts.
+Envelope (formerly SimpleMail) - a minimal, beautiful IMAP/SMTP mail client for Fasthosts.
 
 Architecture: Python backend (IMAP/SMTP, stdlib) + WebView2 frontend
 (pywebview + Pico CSS). Runs on Windows x64 AND Windows ARM64.
@@ -71,10 +71,13 @@ except Exception as e:  # pragma: no cover
 else:
     _WEBVIEW_IMPORT_ERROR = None
 
-APP_NAME = "SimpleMail"
-APP_VERSION = "1.9.29"
+APP_NAME = "Envelope"   # the name the owner sees; it was SimpleMail until 1.9.30
+APP_VERSION = "1.9.30"
 APP_REPO = "Extra-Life-Records/SimpleMail"  # owner/repo for auto-updates
-CONFIG_DIR = Path(os.environ.get("APPDATA", str(Path.home()))) / APP_NAME
+# Only the visible name changed. The settings folder, the exe and release file names, the tools' id
+# (simplemail) and the taskbar identity keep SimpleMail: every PC's mailboxes live in %APPDATA%\SimpleMail
+# and older copies only update from SimpleMail-<arch>.exe, so renaming them would strand someone.
+CONFIG_DIR = Path(os.environ.get("APPDATA", str(Path.home()))) / "SimpleMail"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
 DEFAULTS = {
@@ -722,7 +725,7 @@ def set_seen(cfg, folder, uid, seen, expected_validity=None):
 
 
 def save_attachment(cfg, folder, uid, part_index, expected_validity=None):
-    """Save one attachment part to ~/Downloads/SimpleMail/. Returns path."""
+    """Save one attachment part to ~/Downloads/Envelope/. Returns path."""
     import imaplib
     imap, _, _ = connect_imap(cfg)
     try:
@@ -737,7 +740,7 @@ def save_attachment(cfg, folder, uid, part_index, expected_validity=None):
         if payload is None:
             raise RuntimeError("Attachment is not decodable")
         name = part.get_filename() or f"attachment-{part_index}"
-        out_dir = Path.home() / "Downloads" / "SimpleMail"
+        out_dir = Path.home() / "Downloads" / "Envelope"
         out_dir.mkdir(parents=True, exist_ok=True)
         out = out_dir / os.path.basename(name)
         out.write_bytes(payload)
@@ -999,8 +1002,9 @@ def check_for_update(timeout=15):
     asset = None
     for a in data.get("assets", []):
         name = (a.get("name") or "").lower()
-        # The console agent shares the release but is never a desktop update.
-        if not name.startswith("simplemail-") or not name.endswith(".exe"):
+        # The console agent shares the release but is never a desktop update. The files are still
+        # SimpleMail-<arch>.exe; Envelope-<arch>.exe is understood too, so a later release can take the new name.
+        if not name.startswith(("simplemail-", "envelope-")) or not name.endswith(".exe"):
             continue
         if arch == "arm64" and "arm64" in name:
             asset = a
@@ -1280,7 +1284,7 @@ class Api:
     def message_images_trusted(self, account_id, sender, folder_key=""):
         """Do this message's pictures show without asking: the sender is trusted (rescued, let in, "Always for this
         sender", the owner's own addresses) or someone this mailbox has written to. Never in Junk, where a sender
-        is easily forged. A cloud mailbox has only its trusted list: who it has written to isn't kept where SimpleMail
+        is easily forged. A cloud mailbox has only its trusted list: who it has written to isn't kept where Envelope
         can read it cheaply."""
         import mail_screen
         addr = mail_screen.address(sender).lower()
@@ -2466,7 +2470,8 @@ def main():
         return 0 if all_ok else 1
 
     # Taskbar identity: without an AppUserModelID the icon won't pin/group
-    # properly from a PyInstaller onefile build.
+    # properly from a PyInstaller onefile build. It stays SimpleMail.App: existing
+    # taskbar pins carry it, and a new one would split the window from its pin.
     if os.name == "nt":
         try:
             import ctypes
@@ -2543,7 +2548,7 @@ def main():
             try:
                 webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
                 window = webview.create_window(
-                    f"SimpleMail v{APP_VERSION}",
+                    f"{APP_NAME} v{APP_VERSION}",
                     url=url,
                     js_api=api,
                     text_select=True,

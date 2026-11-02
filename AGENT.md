@@ -1,4 +1,7 @@
-# Connect an AI to a SimpleMail mailbox
+# Connect an AI to an Envelope mailbox
+
+Envelope was called SimpleMail until v1.9.30; the exe and settings folder names, tool ids and
+`SIMPLEMAIL_*` variables below keep that name (see the [README](README.md)).
 
 **Your own assistant (Claude, Codex) uses the app's own tools, `simplemail`**: the running
 app serves them for every mailbox, the way Surf serves browser tools, and Toolbelt connects
@@ -9,7 +12,7 @@ to an unattended model with an owner-written job (`agent_mcp.py serve`, the buil
 The v1.4.1 desktop and console agent are published for Windows x64 and ARM64.
 The released x64 files are installed and checked on the owner's machine.
 Use an MCP client that supports local stdio servers. No model provider is required
-by SimpleMail itself: the connected client supplies the model.
+by Envelope itself: the connected client supplies the model.
 
 For a built-in background worker, open **Agent setup → Connect a model**. Enter
 the provider endpoint, model ID and API format, then the key if needed. Save the
@@ -42,7 +45,7 @@ the app automatically repeats an uncertain move. Permanent deletion is unavailab
 
 ## Assign a job
 
-Open SimpleMail, select a mailbox, and choose **Agent**. Write its
+Open Envelope, select a mailbox, and choose **Agent**. Write its
 job and choose **Enable access**. This grants the connected agent read and draft
 access to that mailbox. **Pause access** revokes future tool calls; it does not
 cancel a read already in flight. Human draft review remains available while paused.
@@ -79,7 +82,7 @@ common `mcpServers` JSON configuration shape:
 ```
 
 Replace the path if the checkout is elsewhere. The client must run as the Windows
-user who owns SimpleMail's settings. This provides mailbox isolation through the
+user who owns Envelope's settings. This provides mailbox isolation through the
 tool interface, not an OS sandbox for clients with unrestricted filesystem access.
 
 Start by asking the model to call `mailbox_identity`, follow the assigned job,
@@ -121,7 +124,7 @@ check the mailbox before taking further action.
 
 Drafts and activity live in `%APPDATA%/SimpleMail/agent/mailbox.sqlite3`. They
 contain email content and should be treated as private mailbox data. Passwords
-remain in the existing SimpleMail config until credential protection is implemented.
+remain in Envelope's existing config until credential protection is implemented.
 
 ## Human draft recovery
 

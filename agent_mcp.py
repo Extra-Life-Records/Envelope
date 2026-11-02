@@ -1,4 +1,4 @@
-"""SimpleMail MCP stdio entry point. Launch separately from the desktop app.
+"""Envelope MCP stdio entry point. Launch separately from the desktop app.
 
 Owner setup: py -3 agent_mcp.py assign ACCOUNT --job "Your job"
 Agent access: py -3 agent_mcp.py serve --account ACCOUNT
@@ -257,7 +257,7 @@ class MCPServer:
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Connect an AI to one SimpleMail mailbox")
+    parser = argparse.ArgumentParser(description="Connect an AI to one Envelope mailbox")
     commands = parser.add_subparsers(dest="command", required=True)
     serve = commands.add_parser("serve", help="Run MCP on stdin/stdout")
     serve.add_argument("--account", required=True)
@@ -282,7 +282,7 @@ def main(argv=None):
     pause = commands.add_parser("pause", help="Owner: pause agent access")
     pause.add_argument("account")
     commands.add_parser("accounts", help="Owner: list mailbox IDs without credentials")
-    commands.add_parser("app", help="Owner's AI: connect to the running SimpleMail app, opening it when needed")
+    commands.add_parser("app", help="Owner's AI: connect to the running Envelope app, opening it when needed")
     managed = commands.add_parser("managed", help="Internal: run the owner's saved model connection")
     managed.add_argument("--account", required=True)
     managed.add_argument("--token", required=True)

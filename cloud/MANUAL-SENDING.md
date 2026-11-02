@@ -1,6 +1,6 @@
 # Owner-controlled outgoing mail
 
-The owner requested normal sending for every existing SimpleMail account on
+The owner requested normal sending for every existing Envelope account on
 27 October 2026. This supersedes the earlier receive-only migration scope.
 AI sending and automatic website notifications remain disabled independently.
 
