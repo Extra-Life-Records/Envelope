@@ -191,6 +191,42 @@ them as Member/Premium. They handle verification and terms. Owner plus four empl
 fills five seats; the fifth email may remain reserved. Invitations expire after
 21 days. Never transfer an old employee's Claude account or history.
 
+## Live triage (Claude routine through the Envelope connector)
+
+The remote MCP (`src/remote_mcp.py`) gives an AI connection with **draft** permission
+on a mailbox three triage tools besides `mail_draft`:
+
+- `mail_search` with `untriaged: true` lists mail not yet tagged.
+- `mail_triage` stores `{category, note, at}` and/or files the email into Inbox, Junk
+  or one of the mailbox's own folders, recording `moved_by: {by: ai, from, reason, at}`.
+  It refuses Sent, Drafts and Trash, drafts, and folders that don't exist. It never
+  deletes, sends or changes read state.
+- `mail_notify_owner` emails a plain-text report from `NotifyFrom` to the fixed
+  `NotifyTo` addresses (at most 48 a day). The AI can't choose a recipient, and IAM
+  allows only that sender and those recipients.
+
+Owner folders: `POST /mailboxes/<name>/folders {"name": "Promotions"}` (Envelope's
+*New folder*) adds up to 50 folders to a cloud mailbox (`custom_folders` on its META row).
+
+**On-arrival trigger** (`TriageFireEnabled=true`): `TriageFireFunction` subscribes to the
+receiving topic and calls the routine's API trigger (`/v1/claude_code/routines/<id>/fire`)
+when non-spam mail arrives, at most once per 5 minutes, skipping the triage sender's own
+reports. It sends no mail content. The routine's hourly schedule is the backstop.
+
+Setup, in order:
+
+1. Deploy with `NotifyEnabled=true NotifyTo=adam@extraliferecords.com
+   NotifyFrom=triage@extraliferecords.com TriageFireEnabled=true` (plus the complete live
+   parameter set, as below). While SES is in the sandbox, `NotifyTo` must be on a
+   verified identity (the extraliferecords.com domain is).
+2. claude.ai/code/routines: create the routine with the prompt from `triage/ROUTINE.md`
+   plus `<owner-rules>`, attach the Envelope connector, add an hourly schedule and an
+   **API** trigger, and generate its token (shown once).
+3. Secrets Manager: put `{"trigger_id": "trig_...", "token": "..."}` in the
+   `TriageFireSecret` the stack created.
+4. Envelope web inbox > AI connections: give the Claude connection **draft** on every
+   mailbox that should be triaged.
+
 ## Robot reader (headless triage for the owner)
 
 Off by default (`ReaderEnabled=false`). When on, it adds a Cognito machine app client

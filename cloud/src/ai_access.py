@@ -59,8 +59,74 @@ def read(table, s3, mailbox, tail, query=None):
     if 'external' in mailbox:
         return external.dispatch(table, mailbox['external'], mailbox['name'], 'GET', tail, query or {}, {})
     if tail == ['messages']:
-        return service.list_messages(table, s3, service.partition(mailbox['item']), query or {}, unread=(query or {}).get('unread') == '1')
+        query = query or {}
+        return service.list_messages(table, s3, service.partition(mailbox['item']), query,
+                                     unread=query.get('unread') == '1', untriaged=query.get('untriaged') == '1')
     return service.read_message(s3, service.message(table, mailbox['item'], tail[1]), tail)
+
+
+PROTECTED_FOLDERS = ('Sent', 'Drafts', 'Trash')
+NOTIFY_DAILY_CAP = 48
+
+
+def organise(table, mailbox, message_id, data):
+    """Record a triage result and optionally file the email. Never deletes, sends or changes read state."""
+    result = {}
+    folder = data.get('folder')
+    if 'external' in mailbox:
+        tail = ['messages', identifier(message_id)]
+        if data.get('category'):
+            result['triage'] = external.dispatch(table, mailbox['external'], mailbox['name'], 'POST', tail + ['triage'], {}, data)['triage']
+        if folder:
+            # Fasthosts mailboxes keep the robot's Inbox/Junk limit.
+            external.dispatch(table, mailbox['external'], mailbox['name'], 'POST', tail + ['move'], {}, data)
+            result['folder'] = folder
+        if not result: raise ValueError('Give a category, a folder, or both')
+        return {'ok': True, **result}
+    item = mailbox['item']
+    row = service.message(table, item, identifier(message_id))
+    if folder is not None:
+        if folder not in service.mailbox_folders(item) or folder in PROTECTED_FOLDERS:
+            raise ValueError('Choose Inbox, Junk or one of the mailbox folders (create it in Envelope first)')
+        if row.get('kind') == 'draft' or row['folder'] in PROTECTED_FOLDERS:
+            raise Denied('Only incoming mail can be filed')
+    if data.get('category'):
+        result['triage'] = reader.tag(table, row, data)['triage']
+    if folder is not None and folder != row['folder']:
+        table.update_item(Key={'pk': row['pk'], 'sk': row['sk']}, UpdateExpression='SET folder=:f, moved_by=:m',
+                          ConditionExpression='folder = :current',
+                          ExpressionAttributeValues={':f': folder, ':current': row['folder'],
+                                                     ':m': {'by': 'ai', 'from': row['folder'], 'reason': reader.text(data, 'reason', 500), 'at': service.timestamp()}})
+        result['folder'] = folder
+    if not result: raise ValueError('Give a category, a folder, or both')
+    return {'ok': True, **result}
+
+
+def notify_owner(table, ses, subject, client, data):
+    """Email a short report to the owner's own fixed addresses. The AI never chooses a recipient."""
+    if os.environ.get('NOTIFY_ENABLED') != 'true': raise Denied('Owner notifications are not enabled')
+    recipients = [address.strip() for address in os.environ.get('NOTIFY_TO', '').split(',') if address.strip()]
+    sender = os.environ.get('NOTIFY_FROM', '')
+    if not recipients or not sender: raise Denied('Owner notifications are not configured')
+    row = table.get_item(Key={'pk': 'GRANT#' + subject, 'sk': identifier(client)}, ConsistentRead=True).get('Item')
+    if not row or not row.get('enabled') or not any('draft' in access.get('permissions', []) for access in row.get('mailboxes', {}).values()):
+        raise Denied('This AI connection cannot notify the owner')
+    title = reader.text(data, 'subject', 150).strip()
+    body = reader.text(data, 'body', 20000)
+    if any(ord(char) < 32 for char in title): raise ValueError('Invalid subject')
+    day = time.strftime('%Y-%m-%d', time.gmtime())
+    try:
+        table.update_item(Key={'pk': 'AI#' + subject, 'sk': 'NOTIFY#' + day}, UpdateExpression='ADD sent :one',
+                          ConditionExpression='attribute_not_exists(sent) OR sent < :cap',
+                          ExpressionAttributeValues={':one': 1, ':cap': NOTIFY_DAILY_CAP})
+    except ClientError as exc:
+        if exc.response['Error']['Code'] != 'ConditionalCheckFailedException': raise
+        raise Denied('Daily notification limit reached') from None
+    request = {'FromEmailAddress': sender, 'Destination': {'ToAddresses': recipients},
+               'Content': {'Simple': {'Subject': {'Data': title}, 'Body': {'Text': {'Data': body}}}}}
+    if os.environ.get('CONFIGURATION_SET'): request['ConfigurationSetName'] = os.environ['CONFIGURATION_SET']
+    response = ses.send_email(**request)
+    return {'sent': True, 'to': recipients, 'provider_id': response.get('MessageId', '')}
 
 
 def save_draft(table, s3, subject, client, name, data):
