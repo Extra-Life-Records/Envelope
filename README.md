@@ -4,8 +4,9 @@ Envelope was called **SimpleMail** until v1.9.30. Only the name you see changed:
 and folders behind it keep the old name, so every PC keeps its mailboxes and keeps updating.
 That is `SimpleMail.exe` and `SimpleMailAgent.exe` in `%LOCALAPPDATA%\Programs\SimpleMail`,
 the settings in `%APPDATA%\SimpleMail`, the release downloads (`SimpleMail-<arch>.exe`), the
-AI tools' id (`simplemail`), the taskbar identity (`SimpleMail.App`), the `SIMPLEMAIL_*`
-variables and this repository's name.
+AI tools' id (`simplemail`), the taskbar identity (`SimpleMail.App`) and the `SIMPLEMAIL_*`
+variables. The repository is now Extra-Life-Records/Envelope; GitHub redirects the old
+SimpleMail address, which copies up to v1.9.30 still update from.
 
 A small native Windows email app so you can read and send mail from your
 Fasthosts mailbox **without logging into webmail.fasthosts.co.uk**.
@@ -202,7 +203,7 @@ to an available screen. Minimizing does not change how it opens next time.
 
 Envelope distributes itself through **GitHub releases**:
 
-- Repo: https://github.com/Extra-Life-Records/SimpleMail
+- Repo: https://github.com/Extra-Life-Records/Envelope (was SimpleMail until 2 Nov 2026)
 - Each release carries desktop and console agent executables for x64 and ARM64:
   `SimpleMail-x64.exe`, `SimpleMail-arm64.exe`, `SimpleMailAgent-x64.exe`, and
   `SimpleMailAgent-arm64.exe`. GitHub Actions builds each on its native architecture.
