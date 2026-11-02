@@ -280,8 +280,10 @@ environment variables only, never from `config.json`:
 | `SIMPLEMAIL_IMAP_PORT` | Optional, default `993` |
 
 It offers `mailbox_unread` plus the search and read tools above. It cannot
-draft, send, file or mark mail as read. The repository's `.mcp.json` registers
-it as `simplemail-inbox`. Set the variables as secrets in the cloud environment,
+draft, send, file or mark mail as read. This repository doesn't register it (it
+used to, as `simplemail-inbox`): add it to the client that needs it, for example
+`claude mcp add simplemail-inbox -- python3 env_mail_mcp.py serve`. On the owner's
+PCs use the app's own tools instead (README, "AI control"). Set the variables as secrets in the cloud environment,
 and allow `mail.livemail.co.uk` in the environment's network policy: the default
 policy blocks it. `python3 env_mail_mcp.py check` logs in and prints the unread
 count, without the password.
