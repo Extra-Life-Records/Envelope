@@ -109,8 +109,8 @@ class TriageTests(unittest.TestCase):
         self.ses.send_email.assert_called_once()
 
 
-def sns(source='fan@example.com', spam='PASS', message_id='abc'):
-    return {'Sns': {'Message': json.dumps({'mail': {'messageId': message_id, 'source': source}, 'receipt': {'spamVerdict': {'status': spam}, 'virusVerdict': {'status': 'PASS'}}})}}
+def sns(source='fan@example.com', spam='PASS', message_id='abc', sender='Fan <fan@example.com>'):
+    return {'Sns': {'Message': json.dumps({'mail': {'messageId': message_id, 'source': source, 'commonHeaders': {'from': [sender]}}, 'receipt': {'spamVerdict': {'status': spam}, 'virusVerdict': {'status': 'PASS'}}})}}
 
 
 class Response:
@@ -138,7 +138,7 @@ class FireTests(unittest.TestCase):
         self.opener.assert_called_once()
 
     def test_spam_own_reports_and_setup_notifications_do_not_fire(self):
-        for record in (sns(spam='FAIL'), sns(source='Triage@extraliferecords.com'), sns(message_id='AMAZON_SES_SETUP_NOTIFICATION')):
+        for record in (sns(spam='FAIL'), sns(source='Triage@extraliferecords.com'), sns(source='0102abc@return-mail.extraliferecords.com', sender='Inbox triage <triage@extraliferecords.com>'), sns(message_id='AMAZON_SES_SETUP_NOTIFICATION')):
             self.assertFalse(triage_fire.handler({'Records': [record]}, None, self.opener)['fired'])
         self.opener.assert_not_called()
 

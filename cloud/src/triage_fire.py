@@ -9,6 +9,7 @@ import json
 import os
 import time
 import urllib.request
+from email.utils import parseaddr
 
 import boto3
 from botocore.exceptions import ClientError
@@ -23,8 +24,10 @@ def wanted(notification):
     # Spam and viruses land in Junk on their own; they don't need a run.
     if any(receipt.get(kind, {}).get('status') != 'PASS' for kind in ('spamVerdict', 'virusVerdict')): return False
     ignored = {address.strip().lower() for address in os.environ.get('TRIAGE_IGNORE_SENDERS', '').split(',') if address.strip()}
-    # The routine's own report must not wake the routine again.
-    return (mail.get('source') or '').lower() not in ignored
+    # The routine's own report must not wake the routine again. SES rewrites the envelope
+    # sender to the custom MAIL FROM domain, so check the From header too.
+    senders = [mail.get('source') or ''] + [parseaddr(value)[1] for value in mail.get('commonHeaders', {}).get('from', [])]
+    return not any(sender.lower() in ignored for sender in senders)
 
 
 def claim(table, now, debounce):

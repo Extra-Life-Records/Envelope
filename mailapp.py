@@ -72,7 +72,7 @@ else:
     _WEBVIEW_IMPORT_ERROR = None
 
 APP_NAME = "Envelope"   # the name the owner sees; it was SimpleMail until 1.9.30
-APP_VERSION = "1.9.30"
+APP_VERSION = "1.9.31"
 APP_REPO = "Extra-Life-Records/SimpleMail"  # owner/repo for auto-updates
 # Only the visible name changed. The settings folder, the exe and release file names, the tools' id
 # (simplemail) and the taskbar identity keep SimpleMail: every PC's mailboxes live in %APPDATA%\SimpleMail
