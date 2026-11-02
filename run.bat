@@ -1,5 +1,5 @@
 @echo off
-rem SimpleMail launcher - works on Windows x64 and ARM64
+rem Envelope launcher - works on Windows x64 and ARM64
 cd /d "%~dp0"
 
 rem Try the py launcher first, then python

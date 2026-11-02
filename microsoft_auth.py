@@ -99,8 +99,8 @@ def sign_in(open_browser=None, timeout=300):
                 return
             received.update({k: v[0] for k, v in query.items()})
             ok = "code" in received and received.get("state") == state
-            page = ("<h2>Signed in. You can close this tab and go back to SimpleMail.</h2>" if ok else
-                    "<h2>Sign-in did not finish. Close this tab and try again in SimpleMail.</h2>")
+            page = ("<h2>Signed in. You can close this tab and go back to Envelope.</h2>" if ok else
+                    "<h2>Sign-in did not finish. Close this tab and try again in Envelope.</h2>")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()

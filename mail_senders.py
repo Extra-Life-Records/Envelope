@@ -247,7 +247,7 @@ def unsubscribe(url, timeout=15):
         target = (parts.path or "/") + ("?" + parts.query if parts.query else "")
         body = b"List-Unsubscribe=One-Click"
         conn.request("POST", target, body=body, headers={
-            "Host": host, "User-Agent": "Mozilla/5.0 SimpleMail",
+            "Host": host, "User-Agent": "Mozilla/5.0 Envelope",
             "Content-Type": "application/x-www-form-urlencoded", "Content-Length": str(len(body))})
         status = conn.getresponse().status
     finally:

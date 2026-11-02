@@ -86,6 +86,14 @@ m = load_app()
 SCRATCH = Path(tempfile.mkdtemp(prefix="sm-test-"))
 
 # ---------------------------------------------------------------------------
+# T0: SimpleMail became Envelope in name only (v1.9.30)
+# ---------------------------------------------------------------------------
+
+check("T0: the app calls itself Envelope", m.APP_NAME == "Envelope", m.APP_NAME)
+check("T0: settings stay in %APPDATA%\\SimpleMail, where every PC's mailboxes live",
+      m.CONFIG_DIR.name == "SimpleMail", str(m.CONFIG_DIR))
+
+# ---------------------------------------------------------------------------
 # T1 + T2: apply_update old-side handover (frozen simulation, isolated scratch)
 # ---------------------------------------------------------------------------
 
@@ -354,6 +362,15 @@ try:
         m.current_arch = lambda arch=arch: arch
         info = m.check_for_update()
         check(f"T4: {arch} never selects the console agent", info["asset_name"] == f"SimpleMail-{arch}.exe")
+
+    envelope_assets = [{"name": f"{name}-{arch}.exe", "browser_download_url": "https://example.invalid/" + name}
+                       for name in ("EnvelopeAgent", "Envelope") for arch in ("x64", "arm64")]
+    urllib.request.urlopen = fake_urlopen({**RELEASE_JSON, "assets": envelope_assets})
+    for arch in ("x64", "arm64"):
+        m.current_arch = lambda arch=arch: arch
+        info = m.check_for_update()
+        check(f"T4: {arch} takes Envelope-{arch}.exe too, never its agent",
+              info["asset_name"] == f"Envelope-{arch}.exe", str(info["asset_name"]))
 
     urllib.request.urlopen = fake_urlopen({**RELEASE_JSON, "assets": [RELEASE_JSON["assets"][0]]})
     m.current_arch = lambda: "arm64"

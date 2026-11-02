@@ -1,6 +1,6 @@
 # Owner receiving health
 
-Native SimpleMail: **Settings → Receiving health and owner settings** opens the existing `/ui/ai.html` page at the configured Ireland API. The opener validates the saved service address, never unlocks or exports the desktop session, and accepts no caller-supplied URL. Sign in through the browser inbox if necessary. Cloud and existing accounts with the same identity remain available, with provider badges in the sidebar and settings picker.
+Native Envelope: **Settings → Receiving health and owner settings** opens the existing `/ui/ai.html` page at the configured Ireland API. The opener validates the saved service address, never unlocks or exports the desktop session, and accepts no caller-supplied URL. Sign in through the browser inbox if necessary. Cloud and existing accounts with the same identity remain available, with provider badges in the sidebar and settings picker.
 
 `GET /mailboxes/operational-health` requires an unexpired access token from `OWNER_CLIENT_ID` and a fresh, consistent `ADMIN/<subject>` record with `enabled: true`. Employee assignments, mailbox grants and Codex/Claude client tokens do not grant access. It creates no AI tool or permissions.
 

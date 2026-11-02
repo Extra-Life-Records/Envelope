@@ -45,7 +45,7 @@ const path = require('node:path');
       }};
     });
     await page.goto(require('node:url').pathToFileURL(path.join(__dirname, '../web/index.html')).href);
-    assert.equal(await page.title(), 'SimpleMail');
+    assert.equal(await page.title(), 'Envelope');
     await page.locator('.msg').first().click();
     await page.locator('#reply-btn').click();
     await page.locator('#compose-backdrop.show').waitFor();

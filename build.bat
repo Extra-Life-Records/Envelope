@@ -1,5 +1,6 @@
 @echo off
-rem Build a standalone SimpleMail.exe with PyInstaller.
+rem Build Envelope as a standalone SimpleMail.exe with PyInstaller (the files keep
+rem the old name: older copies update from it; Windows is told the app is Envelope).
 rem Run this ONCE on an x64 Windows machine, and once on an ARM64 Windows
 rem machine, to get a native .exe for each architecture.
 rem
@@ -15,6 +16,8 @@ where py >nul 2>nul
 if %errorlevel%==0 ( set PY=py -3 ) else ( set PY=python )
 
 %PY% patch_pywebview.py
+%PY% version_resource.py build
+if errorlevel 1 exit /b 1
 
 %PY% -m pip show pyinstaller >nul 2>nul
 if %errorlevel% neq 0 (
@@ -25,6 +28,7 @@ if %errorlevel% neq 0 (
 %PY% -m PyInstaller --noconfirm --clean --onefile --windowed ^
     --name SimpleMail ^
     --icon assets\icon.ico ^
+    --version-file build\version-desktop.txt ^
     --add-data "web;web" ^
     --add-data "assets;assets" ^
     --add-data "runtimeconfig.json;." ^
@@ -35,6 +39,7 @@ if errorlevel 1 exit /b 1
 rem Separate console entry point: MCP requires real stdin/stdout.
 %PY% -m PyInstaller --noconfirm --onefile --console ^
     --name SimpleMailAgent ^
+    --version-file build\version-agent.txt ^
     --add-data "runtimeconfig.json;." ^
     --hidden-import webview.platforms.winforms ^
     agent_mcp.py

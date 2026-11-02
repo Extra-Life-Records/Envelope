@@ -14,7 +14,7 @@ def dispatch(table, s3, ses, claims, path, data):
     if (claims.get('token_use') != 'access' or claims.get('client_id') != os.environ.get('OWNER_CLIENT_ID') or
             not os.environ.get('OWNER_CLIENT_ID') or int(claims.get('exp', 0)) <= time.time() or
             'openid' not in claims.get('scope', '').split()):
-        raise service.Denied('Use the owner SimpleMail sign-in for manual mail')
+        raise service.Denied('Use the owner Envelope sign-in for manual mail')
     if os.environ.get('HUMAN_SENDING_ENABLED') != 'true':
         raise service.Denied('Manual replacement sending remains disabled')
     match = re.fullmatch(r'/human/mailboxes/([a-z0-9-]+)/send', path)

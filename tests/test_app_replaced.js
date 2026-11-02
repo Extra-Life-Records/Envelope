@@ -45,14 +45,14 @@ test('the zlib error becomes a plain restart message and triggers the check', as
   const a = app();
   a.run("api = { app_replaced: async () => ({ replaced: true }) }");
   a.run("toast('Keep this draft open until saving succeeds: error: Error -3 while decompressing data: incorrect header check', true)");
-  assert.match(a.elements.get('toast').textContent, /^SimpleMail was updated while it was open/);
+  assert.match(a.elements.get('toast').textContent, /^Envelope was updated while it was open/);
   await tick();
   assert.equal(a.elements.get('restart-status').hidden, false);
 });
 
 test('the compose status line gets the plain message too', () => {
   const a = app();
-  assert.match(a.run("friendlyError(Error('Error -3 while decompressing data: incorrect header check'))"), /^SimpleMail was updated/);
+  assert.match(a.run("friendlyError(Error('Error -3 while decompressing data: incorrect header check'))"), /^Envelope was updated/);
 });
 
 test('other errors keep their text', () => {

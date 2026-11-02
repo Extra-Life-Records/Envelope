@@ -1,6 +1,6 @@
 # Saved mailbox sign-in
 
-SimpleMail saves its Cognito refresh session protected by Windows DPAPI and
+Envelope saves its Cognito refresh session protected by Windows DPAPI and
 automatically renews its five-minute access token. The original pilot configured
 that saved session to expire after one day, forcing an unnecessary daily login.
 

@@ -1,4 +1,4 @@
-"""Read-only SimpleMail MCP server for headless hosts (cloud sessions, CI, a Pi).
+"""Read-only Envelope MCP server for headless hosts (cloud sessions, CI, a Pi).
 
 The mailbox comes from environment variables, never from config.json or DPAPI:
   SIMPLEMAIL_EMAIL      IMAP login (required)

@@ -1,4 +1,4 @@
-/* SimpleMail frontend - talks to Python via pywebview.api */
+/* Envelope frontend - talks to Python via pywebview.api */
 "use strict";
 
 let api = null;  // set once pywebview has injected its bridge
@@ -275,7 +275,7 @@ const REPLACED_ERROR = /while decompressing data|incorrect header check/;
 
 function friendlyError(error) {
   return REPLACED_ERROR.test(String(error))
-    ? "SimpleMail was updated while it was open. Restart it to carry on (open drafts are kept)." : String(error);
+    ? "Envelope was updated while it was open. Restart it to carry on (open drafts are kept)." : String(error);
 }
 
 function toast(msg, isError = false) {

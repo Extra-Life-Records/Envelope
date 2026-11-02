@@ -5,9 +5,9 @@ It preserves the original inboxes and grants and defaults all new routing/sendin
 Preparation is not deployment or migration acceptance.
 
 **Receiving pilot deployed; not ready for employee use.** This branch implements
-the AWS backend, web inbox and SimpleMail provider window. Five reserved inboxes
+the AWS backend, web inbox and Envelope provider window. Five reserved inboxes
 received real Gmail tests with attachments. Public forwarding and owner web login
-work. MFA enrollment confirmation, outbound mail and installed SimpleMail acceptance
+work. MFA enrollment confirmation, outbound mail and installed Envelope acceptance
 remain pending. No employee or
 Claude accounts have been created.
 
@@ -83,7 +83,7 @@ New assignments have separate history namespaces, including for delayed retries.
 
 The inbox supports reading, replies, Sent, Drafts, Junk, recoverable Trash,
 attachments and paginated full text-body/header search. Binary attachments are
-not searched. The API preserves original HTML for SimpleMail’s sandboxed, sanitized reader.
+not searched. The API preserves original HTML for Envelope's sandboxed, sanitized reader.
 Remote images remain opt-in and scripts are blocked. Plain-text fallback retains
 safe link destinations, including action buttons in HTML-only invitations.
 The chronological index is eventually consistent, so refresh may be needed after writes.
@@ -97,7 +97,7 @@ Send claims are durable and uncertain outcomes never automatically retry.
 The UI persists the request reference across reloads and saves the draft first.
 SES acceptance, delivery, bounce and complaint are separate recorded states.
 
-SimpleMail lists the five employee accounts alongside IMAP accounts in its main
+Envelope lists the five employee accounts alongside IMAP accounts in its main
 sidebar and uses the shared reader and composer through a Python provider adapter. Sign-in uses the system browser, authorization code and PKCE.
 Windows DPAPI protects the refresh session. Clients receive no AWS keys. The web
 UI stores refresh sessions in sessionStorage and revokes them on sign-out.
@@ -298,7 +298,7 @@ reader API, so the client ID, secret **and** `ReaderApiUrl` all change: update
 - [ ] Cross-employee read/search/download isolation, including after reassignment.
 - [ ] S3 version recovery and DynamoDB PITR restore into isolated recovery resources;
       verify restored MIME, attachments and authorization metadata before cutover.
-- [ ] Packaged/installed SimpleMail x64 and ARM64, native login and attachment save.
+- [ ] Packaged/installed Envelope x64 and ARM64, native login and attachment save.
 - [ ] Real employee Claude invitation accepted with correct role/seat and no extra purchase.
 
 Rollback disables only the five new forwarders, sets sending false and restores

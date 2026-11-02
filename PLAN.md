@@ -1,4 +1,4 @@
-# SimpleMail: an inbox an AI can own
+# Envelope (formerly SimpleMail): an inbox an AI can own
 
 Keep the human interface small: Inbox, Needs you, Activity, and one instruction
 box. Ordinary reading and composing remain available. Put complexity in the

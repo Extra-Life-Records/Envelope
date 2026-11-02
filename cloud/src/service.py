@@ -596,7 +596,7 @@ def api(event, context):
             # Keep operational/account state out of mailbox grants and MCP tools.
             # Check the app client before even reading the owner record.
             if not os.environ.get('OWNER_CLIENT_ID') or claims.get('client_id') != os.environ['OWNER_CLIENT_ID']:
-                raise Denied('Open receiving health with the owner SimpleMail session')
+                raise Denied('Open receiving health with the owner Envelope session')
             if event['requestContext']['http']['method'] != 'GET':
                 raise Denied('Receiving health is read-only')
             table = boto3.resource('dynamodb').Table(os.environ['TABLE'])
@@ -607,7 +607,7 @@ def api(event, context):
             return {'statusCode': 200, 'headers': {'Content-Type': 'application/json', 'Cache-Control': 'no-store'},
                     'body': json.dumps(snapshot())}
         if event.get('rawPath', '').startswith('/ai/') and claims.get('client_id') != os.environ.get('OWNER_CLIENT_ID'):
-            raise Denied('Open AI settings with the owner SimpleMail session')
+            raise Denied('Open AI settings with the owner Envelope session')
         raw = event.get('body') or '{}'
         if event.get('isBase64Encoded'): raw = base64.b64decode(raw).decode()
         if len(raw) > 4500000: raise ValueError('Request exceeds size limit')

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SimpleMail</title>
+<title>Envelope</title>
 <link rel="stylesheet" href="pico.min.css">
 <style>
   :root {
@@ -541,7 +541,7 @@
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
         <rect x="2" y="4" width="20" height="16" rx="3"/><path d="m2 7 10 6 10-6"/>
       </svg>
-      SimpleMail
+      Envelope
     </div>
     <div id="compose-wrap">
       <button id="compose-btn" class="contrast" aria-controls="compose-from-menu">+  New message</button>
@@ -556,7 +556,7 @@
       <button type="button" id="cloud-settings" class="outline">Connection settings</button>
     </div>
     <div id="restart-status" role="status" hidden>
-      <span>SimpleMail has been updated. Restart to finish (open drafts are kept).</span>
+      <span>Envelope has been updated. Restart to finish (open drafts are kept).</span>
       <button type="button" id="restart-now">Restart now</button>
     </div>
     <div id="sidebar-scroll">
@@ -738,7 +738,7 @@
   <div class="modal-backdrop" id="update-backdrop">
     <div class="modal" style="width:520px">
       <h2>✨ Update available</h2>
-      <p style="margin:0 0 6px">A new version of SimpleMail is ready: <b id="upd-version"></b></p>
+      <p style="margin:0 0 6px">A new version of Envelope is ready: <b id="upd-version"></b></p>
       <div id="upd-notes" style="font-size:0.85rem;color:var(--pico-muted-color);max-height:140px;overflow-y:auto;margin-bottom:10px"></div>
       <div id="upd-progress" style="display:none;margin-bottom:10px">
         <progress id="upd-bar" value="0" max="100" style="margin:0"></progress>
@@ -773,12 +773,12 @@
       <label id="screening-row" style="display:none">
         <input type="checkbox" id="screening-toggle" role="switch">
         <span>Screen new mail: senders you haven't written to or let in go to a <b>Screener</b> folder
-        (while SimpleMail is open)</span>
+        (while Envelope is open)</span>
       </label>
       <div id="senders-list"></div>
       <p style="margin:8px 0 0;font-size:0.78rem;color:var(--pico-muted-color)">
         Trash moves are listed in Activity with Undo. Block also moves this sender's new Inbox mail to Trash
-        whenever SimpleMail lists the Inbox.</p>
+        whenever Envelope lists the Inbox.</p>
       <div class="actions"><button class="outline secondary" id="senders-close">Close</button></div>
     </section>
   </div>

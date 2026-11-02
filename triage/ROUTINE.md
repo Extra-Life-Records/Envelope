@@ -117,7 +117,7 @@ Important (<n>)
 Drafts ready to check (<n>), in each inbox's Drafts folder
 - <inbox> · to <person>: <what the draft says, in a few words>
 
-Moved to Junk (<n>). Move any back in SimpleMail if I got it wrong
+Moved to Junk (<n>). Move any back in Envelope if I got it wrong
 - <inbox> · <sender>: <why>
 
 Possible scams left in Inbox (<n>)

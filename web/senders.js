@@ -158,7 +158,7 @@ async function setScreening(on) {
 
 async function unsubscribeSender(g, button) {
   const view = sendersView;
-  if (!confirm(`Unsubscribe from ${g.site}?\n\nSimpleMail tells the sender you want no more emails (one-click unsubscribe).`)) return;
+  if (!confirm(`Unsubscribe from ${g.site}?\n\nEnvelope tells the sender you want no more emails (one-click unsubscribe).`)) return;
   button.disabled = true; button.textContent = "Unsubscribing…";
   try {
     await api.unsubscribe_sender(view.accountId, view.server, g.site);

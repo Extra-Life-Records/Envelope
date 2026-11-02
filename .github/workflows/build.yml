@@ -45,14 +45,23 @@ jobs:
         run: |
           python patch_pywebview.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python version_resource.py build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build desktop and console agent
         run: |
-          python -m PyInstaller --noconfirm --clean --onefile --windowed --name SimpleMail --icon assets/icon.ico --add-data "web;web" --add-data "cloud/src/static;cloud/src/static" --add-data "assets;assets" --add-data "runtimeconfig.json;." --hidden-import webview.platforms.winforms mailapp.py
+          python -m PyInstaller --noconfirm --clean --onefile --windowed --name SimpleMail --icon assets/icon.ico --version-file build/version-desktop.txt --add-data "web;web" --add-data "cloud/src/static;cloud/src/static" --add-data "assets;assets" --add-data "runtimeconfig.json;." --hidden-import webview.platforms.winforms mailapp.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -m PyInstaller --noconfirm --clean --onefile --console --name SimpleMailAgent --add-data "runtimeconfig.json;." --hidden-import webview.platforms.winforms agent_mcp.py
+          python -m PyInstaller --noconfirm --clean --onefile --console --name SimpleMailAgent --version-file build/version-agent.txt --add-data "runtimeconfig.json;." --hidden-import webview.platforms.winforms agent_mcp.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Verify packaged architecture and isolated agent
         run: python tests/package_smoke.py --arch ${{ matrix.arch }} --directory dist
+      - name: Verify Windows calls the exes Envelope
+        run: |
+          foreach ($exe in 'SimpleMail', 'SimpleMailAgent') {
+            $info = (Get-Item "dist/$exe.exe").VersionInfo
+            "$exe.exe: $($info.FileDescription), $($info.ProductName) $($info.ProductVersion)"
+            if ($info.ProductName -ne 'Envelope') { throw "$exe.exe is missing its Envelope version details" }
+          }
       - name: Name release downloads
         run: |
           Move-Item -LiteralPath dist/SimpleMail.exe -Destination dist/SimpleMail-${{ matrix.arch }}.exe

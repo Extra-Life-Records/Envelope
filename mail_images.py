@@ -94,7 +94,7 @@ def _fetch(url, deadline, limit):
                 target += "?" + parts.query
             conn.request("GET", target, headers={
                 "Host": "[" + host + "]" if ":" in host else host,
-                "User-Agent": "Mozilla/5.0 SimpleMail",
+                "User-Agent": "Mozilla/5.0 Envelope",
                 "Accept": "image/png,image/jpeg,image/gif,image/webp,image/avif,image/bmp",
                 "Accept-Encoding": "identity",
             })
