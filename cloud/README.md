@@ -211,7 +211,7 @@ Owner folders: `POST /mailboxes/<name>/folders {"name": "Promotions"}` (Envelope
 **On-arrival trigger** (`TriageFireEnabled=true`): `TriageFireFunction` subscribes to the
 receiving topic and calls the routine's API trigger (`/v1/claude_code/routines/<id>/fire`)
 when non-spam mail arrives, at most once per 5 minutes, skipping the triage sender's own
-reports. It sends no mail content. The routine's hourly schedule is the backstop.
+reports. It sends no mail content. The routine's 4-hourly schedule is the backstop.
 
 Setup, in order:
 
@@ -220,7 +220,7 @@ Setup, in order:
    parameter set, as below). While SES is in the sandbox, `NotifyTo` must be on a
    verified identity (the extraliferecords.com domain is).
 2. claude.ai/code/routines: create the routine with the prompt from `triage/ROUTINE.md`
-   plus `<owner-rules>`, attach the Envelope connector, add an hourly schedule and an
+   plus `<owner-rules>`, attach the Envelope connector, add a 4-hourly schedule and an
    **API** trigger, and generate its token (shown once).
 3. Secrets Manager: put `{"trigger_id": "trig_...", "token": "..."}` in the
    `TriageFireSecret` the stack created.
