@@ -127,6 +127,8 @@ class ProtocolTests(unittest.TestCase):
             response=remote_mcp.api({'rawPath':'/mcp','requestContext':{'http':{'method':'POST'}}},None)
             self.assertEqual(response['statusCode'],401)
             self.assertIn('oauth-protected-resource/mcp',response['headers']['WWW-Authenticate'])
+            self.assertIn('scope="https://mail.example/mcp/read https://mail.example/mcp/draft"',response['headers']['WWW-Authenticate'])
+            self.assertNotIn('send-approved',response['headers']['WWW-Authenticate'])
             metadata=remote_mcp.api({'rawPath':'/.well-known/oauth-protected-resource/mcp','requestContext':{'http':{'method':'GET'}}},None)
             self.assertEqual(json.loads(metadata['body'])['resource'],'https://mail.example/mcp')
             self.assertEqual(json.loads(metadata['body'])['scopes_supported'], ['https://mail.example/mcp/read', 'https://mail.example/mcp/draft', 'https://mail.example/mcp/send-approved'])
