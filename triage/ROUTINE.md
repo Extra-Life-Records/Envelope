@@ -7,7 +7,7 @@ cloud mailboxes through the **Envelope connector** (the remote MCP in
 - **On arrival:** the stack's `TriageFireFunction` calls the routine's API trigger when
   new mail lands (at most once every 5 minutes). The run gets a
   `<routine-fire-payload>` block that only says new mail arrived. It carries no mail.
-- **Hourly backstop:** a schedule picks up anything that arrived while a run was going.
+- **Backstop:** a schedule every 4 hours (`7 */4 * * *` UTC) picks up anything that arrived while a run was going.
 
 This repository is public, so the owner's own rules (who matters, tone, sign-offs,
 what each mailbox speaks for) are **not** here. They arrive in the routine's prompt
