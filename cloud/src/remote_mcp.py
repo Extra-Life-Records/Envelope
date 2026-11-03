@@ -125,7 +125,9 @@ def rpc(claims, message, clients=None):
             params = message.get('params', {})
             result = call_tool(*(clients or service.clients()), claims, params.get('name'), params.get('arguments', {}))
             response['result'] = {'content': [{'type': 'text', 'text': json.dumps(result, default=lambda value: int(value))}]}
-        except (Denied, ValueError, KeyError, TypeError):
+        except (Denied, ValueError, KeyError, TypeError) as exc:
+            # Audit line: tool and reason only, never arguments or mail content.
+            print(json.dumps({'mcp_refused': str(params.get('name'))[:40], 'error': type(exc).__name__, 'reason': str(exc)[:120]}))
             response['result'] = {'isError': True, 'content': [{'type': 'text', 'text': 'Request denied or invalid. Check the connection permissions, mailbox, draft revision and owner approval.'}]}
         except Exception:
             response['result'] = {'isError': True, 'content': [{'type': 'text', 'text': 'Mail service unavailable. Reuse the same request ID or approved reference when checking an uncertain outcome.'}]}
@@ -144,7 +146,9 @@ def api(event, context):
         return {'statusCode': 403, 'headers': headers, 'body': json.dumps({'error': 'Origin not allowed'})}
     try: claims = verify_token(supplied.get('authorization', ''))
     except (Denied, jwt.PyJWTError):
-        headers['WWW-Authenticate'] = f'Bearer resource_metadata="{origin}/.well-known/oauth-protected-resource/mcp", scope="{scope("read")}"'
+        # Ask for read and draft (triage, drafts, owner reports), never send-approved: a client
+        # that requests only the challenged scope would otherwise get a read-only token.
+        headers['WWW-Authenticate'] = f'Bearer resource_metadata="{origin}/.well-known/oauth-protected-resource/mcp", scope="{scope("read")} {scope("draft")}"'
         return {'statusCode': 401, 'headers': headers, 'body': json.dumps({'error': 'OAuth connection required'})}
     if method != 'POST': return {'statusCode': 405, 'headers': {**headers, 'Allow': 'POST'}, 'body': ''}
     if 'application/json' not in supplied.get('content-type', ''):
