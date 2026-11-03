@@ -65,9 +65,16 @@ hello@meandtherobots.com and hello@lightspeedruinedtamworth.co.uk.
 
 `adam@extraliferecords.com` (mailbox `mail-adam`, state Reserved) was added on 27 Oct 2026
 by adding it to that rule, adding `mail-adam` to the stack's `MailboxRegistry` parameter
-and creating its `META` row. A deploy of this repository's `template.yaml` replaces the
-hand-deployed rule. Before such a deploy, set `AdditionalReceiveRecipients` to every
-address above and `MailboxRegistry` to match, or those addresses stop receiving.
+and creating its `META` row.
+
+On 3 Nov 2026 the hand-deployed resources were brought into `template.yaml` exactly as
+deployed: `PreparedMigrationReceiptRule` (the rule above), the extraliferecords.com,
+meandtherobots.com and lightspeedruinedtamworth.co.uk receive identities (Retain), the
+owner receiving alerts topic (emails meandtherobots@gmail.com) and the receiving SNS
+dead-letter queue and alarm. To add an address now, add it to
+`PreparedMigrationReceiptRule` in the template and to `MailboxRegistry`, then deploy.
+Never deploy from an uncommitted template: check the change set has no `Remove` on a
+receipt rule or identity before executing it.
 
 ## Private backup format and verification
 

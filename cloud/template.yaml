@@ -670,7 +670,11 @@ Resources:
         - DynamoDBCrudPolicy: {TableName: !Ref MailTable}
         - S3ReadPolicy: {BucketName: !Ref MailBucket}
       Events:
-        Received: {Type: SNS, Properties: {Topic: !Ref ReceiveTopic}}
+        Received:
+          Type: SNS
+          Properties:
+            Topic: !Ref ReceiveTopic
+            RedrivePolicy: {deadLetterTargetArn: !GetAtt ReceiveNotificationFailures.Arn}
   TriageFireSecret:
     Type: AWS::SecretsManager::Secret
     Condition: TriageFireOn
@@ -809,6 +813,127 @@ Resources:
       Threshold: 0
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
+      AlarmActions: [!Ref OwnerReceiveAlertsTopic]
+      OKActions: [!Ref OwnerReceiveAlertsTopic]
+  # Deployed by hand on 19-27 Oct 2026 (see MIGRATION.md) and brought into the template
+  # on 3 Nov 2026 so a deploy of this file keeps receiving exactly as it is.
+  PreparedMigrationReceiptRule:
+    Type: AWS::SES::ReceiptRule
+    DependsOn: [ReceiptRule, MailBucketPolicy, ReceiveTopicPolicy, ExtraLifeReceiveIdentity, RobotsReceiveIdentity, LightspeedReceiveIdentity]
+    Properties:
+      RuleSetName: !Ref Rules
+      After: playloudr-reserved
+      Rule:
+        Name: playloudr-migration-prepared
+        Enabled: true
+        ScanEnabled: true
+        TlsPolicy: Require
+        Recipients:
+          - adam@extraliferecords.com
+          - dizzyteapot@extraliferecords.com
+          - five@extraliferecords.com
+          - four@extraliferecords.com
+          - hello@extraliferecords.com
+          - hello@lightspeedruinedtamworth.co.uk
+          - hello@meandtherobots.com
+          - one@extraliferecords.com
+          - playloudr@extraliferecords.com
+          - three@extraliferecords.com
+          - two@extraliferecords.com
+        Actions:
+          - S3Action: {BucketName: !Ref MailBucket, ObjectKeyPrefix: incoming/, TopicArn: !Ref ReceiveTopic}
+  ExtraLifeReceiveIdentity:
+    Type: AWS::SES::EmailIdentity
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      EmailIdentity: extraliferecords.com
+      DkimAttributes: {SigningEnabled: true}
+      DkimSigningAttributes: {NextSigningKeyLength: RSA_2048_BIT}
+  RobotsReceiveIdentity:
+    Type: AWS::SES::EmailIdentity
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      EmailIdentity: meandtherobots.com
+      DkimAttributes: {SigningEnabled: true}
+      DkimSigningAttributes: {NextSigningKeyLength: RSA_2048_BIT}
+  LightspeedReceiveIdentity:
+    Type: AWS::SES::EmailIdentity
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      EmailIdentity: lightspeedruinedtamworth.co.uk
+      DkimAttributes: {SigningEnabled: true}
+      DkimSigningAttributes: {NextSigningKeyLength: RSA_2048_BIT}
+  OwnerReceiveAlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: simplemail-owner-receiving-alerts
+      DisplayName: SimpleMail receiving alerts
+      Tags: [{Key: Purpose, Value: Owner receiving failure notifications without message content}]
+  OwnerReceiveAlertsEmail:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref OwnerReceiveAlertsTopic
+      Protocol: email
+      Endpoint: meandtherobots@gmail.com
+  OwnerReceiveAlertsTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics: [!Ref OwnerReceiveAlertsTopic]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: OnlyExactReceivingAlarmsMayPublish
+            Effect: Allow
+            Principal: {Service: cloudwatch.amazonaws.com}
+            Action: sns:Publish
+            Resource: !Ref OwnerReceiveAlertsTopic
+            Condition:
+              ArnEquals: {'aws:SourceArn': [!GetAtt FailureAlarm.Arn, !GetAtt ReceiveNotificationFailureAlarm.Arn]}
+              StringEquals: {'aws:SourceAccount': !Ref 'AWS::AccountId'}
+  ReceiveNotificationFailures:
+    Type: AWS::SQS::Queue
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties: {MessageRetentionPeriod: 1209600, SqsManagedSseEnabled: true}
+  ReceiveNotificationFailurePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues: [!Ref ReceiveNotificationFailures]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: OnlyReceivingTopicMayRedrive
+            Effect: Allow
+            Principal: {Service: sns.amazonaws.com}
+            Action: sqs:SendMessage
+            Resource: !GetAtt ReceiveNotificationFailures.Arn
+            Condition:
+              ArnEquals: {'aws:SourceArn': !Ref ReceiveTopic}
+              StringEquals: {'aws:SourceAccount': !Ref 'AWS::AccountId'}
+  ReceiveNotificationFailureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Investigate and replay failed SNS receiving notifications.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions: [{Name: QueueName, Value: !GetAtt ReceiveNotificationFailures.QueueName}]
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref OwnerReceiveAlertsTopic]
+      OKActions: [!Ref OwnerReceiveAlertsTopic]
+  HumanSendLogs:
+    Type: AWS::Logs::LogGroup
+    Condition: HumanSendingOn
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${HumanSendFunction}'
+      RetentionInDays: 30
   Budget:
     Type: AWS::Budgets::Budget
     Properties:
@@ -825,6 +950,36 @@ Resources:
         - Notification: {NotificationType: ACTUAL, ComparisonOperator: GREATER_THAN, Threshold: 20, ThresholdType: ABSOLUTE_VALUE}
           Subscribers: [{SubscriptionType: EMAIL, Address: !Ref BudgetEmail}]
 Outputs:
+  ReceiveNotificationFailureQueue:
+    Description: Separate SNS delivery-failure queue; inspect without consuming until a replay is reviewed.
+    Value: !Ref ReceiveNotificationFailures
+  ExtraLifeReceiveIdentityDkim1:
+    Description: Pending verification DNS CNAME for extraliferecords.com; does not change MX or enable sending.
+    Value: !Join [' -> ', [!GetAtt ExtraLifeReceiveIdentity.DkimDNSTokenName1, !GetAtt ExtraLifeReceiveIdentity.DkimDNSTokenValue1]]
+  ExtraLifeReceiveIdentityDkim2:
+    Description: Pending verification DNS CNAME for extraliferecords.com; does not change MX or enable sending.
+    Value: !Join [' -> ', [!GetAtt ExtraLifeReceiveIdentity.DkimDNSTokenName2, !GetAtt ExtraLifeReceiveIdentity.DkimDNSTokenValue2]]
+  ExtraLifeReceiveIdentityDkim3:
+    Description: Pending verification DNS CNAME for extraliferecords.com; does not change MX or enable sending.
+    Value: !Join [' -> ', [!GetAtt ExtraLifeReceiveIdentity.DkimDNSTokenName3, !GetAtt ExtraLifeReceiveIdentity.DkimDNSTokenValue3]]
+  RobotsReceiveIdentityDkim1:
+    Description: Pending verification DNS CNAME for meandtherobots.com; does not change MX or enable sending.
+    Value: !Join [' -> ', [!GetAtt RobotsReceiveIdentity.DkimDNSTokenName1, !GetAtt RobotsReceiveIdentity.DkimDNSTokenValue1]]
+  RobotsReceiveIdentityDkim2:
+    Description: Pending verification DNS CNAME for meandtherobots.com; does not change MX or enable sending.
+    Value: !Join [' -> ', [!GetAtt RobotsReceiveIdentity.DkimDNSTokenName2, !GetAtt RobotsReceiveIdentity.DkimDNSTokenValue2]]
+  RobotsReceiveIdentityDkim3:
+    Description: Pending verification DNS CNAME for meandtherobots.com; does not change MX or enable sending.
+    Value: !Join [' -> ', [!GetAtt RobotsReceiveIdentity.DkimDNSTokenName3, !GetAtt RobotsReceiveIdentity.DkimDNSTokenValue3]]
+  LightspeedReceiveIdentityDkim1:
+    Description: Pending verification DNS CNAME for lightspeedruinedtamworth.co.uk; does not change MX or enable sending.
+    Value: !Join [' -> ', [!GetAtt LightspeedReceiveIdentity.DkimDNSTokenName1, !GetAtt LightspeedReceiveIdentity.DkimDNSTokenValue1]]
+  LightspeedReceiveIdentityDkim2:
+    Description: Pending verification DNS CNAME for lightspeedruinedtamworth.co.uk; does not change MX or enable sending.
+    Value: !Join [' -> ', [!GetAtt LightspeedReceiveIdentity.DkimDNSTokenName2, !GetAtt LightspeedReceiveIdentity.DkimDNSTokenValue2]]
+  LightspeedReceiveIdentityDkim3:
+    Description: Pending verification DNS CNAME for lightspeedruinedtamworth.co.uk; does not change MX or enable sending.
+    Value: !Join [' -> ', [!GetAtt LightspeedReceiveIdentity.DkimDNSTokenName3, !GetAtt LightspeedReceiveIdentity.DkimDNSTokenValue3]]
   McpUrl:
     Condition: McpOn
     Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/mcp'
