@@ -53,14 +53,44 @@ async function mcpShow(target) {
       const folder = state.folders.find((f) => [f.key, f.name, f.server].some((v) => String(v || "").toLowerCase() === want));
       if (!folder) return {error: "This mailbox has no folder called " + target.folder};
       if (folder.key !== state.currentFolder || mailSearch) await selectFolder(folder.key);
+      if (folder.key !== state.currentFolder) return {error: mcpOpenDraftBlocks()};
     }
     if (target.uid) {
       const listed = state.messages.find((m) => !m.localDraftId && String(m.server_uid || m.uid) === String(target.uid));
       await openMessage(listed ? listed.uid : String(target.uid));
     }
-    if (target.draft_id) await resumeComposeDraft(target.draft_id);
+    if (target.draft_id) {
+      await resumeComposeDraft(target.draft_id);
+      if (!(composeVisible() && composeSession?.id === target.draft_id)) {
+        return {error: await mcpDraftProblem(state.activeAccountId, target.draft_id)};
+      }
+    }
     return await mcpScreen();
   } catch (e) { return {error: String(e?.message || e)}; }
+}
+
+// The window stays on a draft it can't save rather than lose the owner's words: say so, so the
+// AI tells the owner instead of reporting that something opened when it didn't.
+function mcpOpenDraftBlocks() {
+  return composeVisible() ? "The draft open in the window can't be saved (" + $("compose-save-status").textContent +
+    "), so Envelope stayed on it. The owner can press Keep draft or Discard on it" : "Envelope couldn't change what the window shows";
+}
+
+async function mcpDraftProblem(accountId, draftId) {
+  if (composeVisible() && composeSession && composeSession.id !== draftId) return mcpOpenDraftBlocks();
+  try {
+    const draft = await api.get_compose_draft(accountId, draftId);
+    if (draft.status === "dismissed") return "That draft was thrown away";
+    if (draft.status === "sent") return "That draft was already sent";
+    if (draft.status !== "pending") return "That draft is being sent or needs a delivery check: look in Sent";
+  } catch (e) { return String(e?.message || e); }
+  return "Envelope couldn't open that draft";
+}
+
+// The AI changed, sent or threw away a draft: the window follows the saved copy (web/compose.js).
+async function mcpDraftChanged(accountId, draftId) {
+  try { return {result: await draftChangedElsewhere(accountId, draftId)}; }
+  catch (e) { return {error: String(e?.message || e)}; }
 }
 
 // The AI changed mail: show the server's lists again rather than remembered ones.

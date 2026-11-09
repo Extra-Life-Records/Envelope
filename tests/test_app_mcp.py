@@ -127,6 +127,11 @@ class FakeApi:
         self.calls.append(("send", account_id, draft_id, revision))
         return {"status": "sent", "sent_as": "denby@example.com"}
 
+    def discard_compose_draft(self, account_id, draft_id, revision):
+        self.calls.append(("discard", account_id, draft_id, revision))
+        self.drafts[draft_id]["status"] = "dismissed"
+        return {"status": "dismissed"}
+
 
 class FakeMailbox:
     """Stands in for MailboxAgent(owner_access=True)."""
@@ -369,6 +374,37 @@ class ToolTests(unittest.TestCase):
         self.tools.window = window
         with self.assertRaisesRegex(ValueError, "No folder called X"):
             self.tools.show(account="denby")
+
+    def test_changing_sending_or_discarding_a_draft_makes_the_window_follow_the_saved_copy(self):
+        window = Mock()
+        scripts = []
+
+        def evaluate_js(script, callback=None):
+            scripts.append(script)
+            if callback:
+                callback({"result": "closed"})
+        window.evaluate_js.side_effect = evaluate_js
+        self.tools.window = window
+        first = self.tools.draft(account="denby", to="x@example.com", subject="Hi", body="Hello")
+        self.assertFalse([s for s in scripts if "mcpDraftChanged" in s])   # a new draft isn't open anywhere
+        changed = self.tools.draft(account="denby", draft_id=first["draft_id"], revision=first["revision"],
+                                   subject="Hi again")
+        self.tools.discard_draft("denby", changed["draft_id"], changed["revision"])
+        second = self.tools.draft(account="denby", to="y@example.com", subject="Two", body="Hello")
+        self.tools.send("denby", second["draft_id"], second["revision"])
+        follows = [s for s in scripts if "mcpDraftChanged(" in s]
+        self.assertEqual(len(follows), 3)
+        for script, draft_id in zip(follows, (first["draft_id"], first["draft_id"], second["draft_id"])):
+            self.assertIn(f'mcpDraftChanged("denby", {json.dumps(draft_id)})', script)
+
+    def test_a_window_that_cannot_follow_a_draft_does_not_fail_the_tool(self):
+        window = Mock()
+        window.evaluate_js.side_effect = lambda script, callback=None: callback and callback({"error": "No window"})
+        self.tools.window = window
+        draft = self.tools.draft(account="denby", to="x@example.com", subject="Hi", body="Hello")
+        self.assertEqual(self.tools.discard_draft("denby", draft["draft_id"], draft["revision"])["discarded"],
+                         draft["draft_id"])
+        self.assertEqual(self.api.calls[-1], ("discard", "denby", draft["draft_id"], 1))
 
     def test_writes_refresh_the_window_lists(self):
         window = Mock()

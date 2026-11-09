@@ -33,7 +33,7 @@ function setComposeBusy(session, busy) {
 function startComposeSession(accountId, draft = null) {
   clearTimeout(composeSaveTimer);
   composeSession = {id: draft?.id || crypto.randomUUID(), accountId, revision: draft?.revision || 0,
-    generation: 0, queue: Promise.resolve(), busy: false, payload: null,
+    generation: 0, savedGeneration: 0, queue: Promise.resolve(), busy: false, payload: null,
     inReplyTo: draft?.payload?.in_reply_to || "", references: draft?.payload?.references || "",
     attachments: draft?.attachments || []};
   $("compose-save-status").textContent = "Saving on this device…";
@@ -87,6 +87,7 @@ async function persistCompose() {
       payload.to, payload.subject, payload.body, payload.body_html, payload.cc, payload.bcc,
       payload.in_reply_to, payload.references, payload.attachment_ids);
     session.revision = draft.revision;
+    session.savedGeneration = Math.max(session.savedGeneration || 0, generation);
     if (session.generation === generation) session.payload = payload;
     backupCompose(session);
     if (composeSession === session && session.generation === generation) {
@@ -112,7 +113,10 @@ async function closeCompose() {
     hideCompose();
     if (state.currentFolder === "drafts") loadMessages();
     return true;
-  } catch (error) { toast("Keep this draft open until saving succeeds: " + error, true); return false; }
+  } catch (error) {
+    if (await closeStaleCompose(session, "close")) return true;
+    toast("Keep this draft open until saving succeeds: " + error, true); return false;
+  }
   finally { setComposeBusy(session, false); }
 }
 
@@ -126,8 +130,75 @@ async function discardCompose() {
     clearComposeRecovery(session);
     hideCompose();
     if (state.currentFolder === "drafts") loadMessages();
-  } catch (error) { toast("Could not discard draft: " + error, true); }
+  } catch (error) {
+    if (!(await closeStaleCompose(session, "discard"))) toast("Could not discard draft: " + error, true);
+  }
   finally { setComposeBusy(session, false); }
+}
+
+// What the saved copy of a draft says now: its status and revision (nulls if it can't be read,
+// e.g. a new draft that was never saved).
+async function composeFate(session) {
+  try {
+    const draft = await api.get_compose_draft(session.accountId, session.id);
+    return {status: draft.status, revision: draft.revision};
+  } catch { return {status: null, revision: null}; }
+}
+
+// Why a closed copy closed, said to the owner. action is what they were doing: close, discard or send.
+function staleDraftMessage(why, action) {
+  if (why === "sending" || why === "uncertain") return "This draft is being sent or needs a delivery check: look in Sent";
+  if (action === "send") return {dismissed: "Not sent: this draft was thrown away",
+    sent: "Not sent again: this draft was already sent",
+    changed: "Not sent: this draft was changed outside this window. Reopen it from Drafts and check it first",
+  }[why] || "Not sent: this draft can't be edited any more";
+  if (action === "discard" && why === "dismissed") return "Thrown away";
+  return {dismissed: "This draft was thrown away, so it was closed",
+    sent: "This draft was sent, so it was closed",
+    changed: "This draft was changed outside this window, so this copy was closed. Reopen it from Drafts",
+  }[why] || "This draft can't be edited any more, so it was closed";
+}
+
+// Saving failed. If the draft was thrown away, sent or changed outside this window (by the AI or
+// another window), this copy can never be saved, kept, discarded or sent: close it and say why,
+// rather than holding the owner in front of a dead draft. Ordinary failures (disk, network) keep
+// the editor and its words. Returns true when it closed the editor.
+async function closeStaleCompose(session, action) {
+  const fate = await composeFate(session);
+  let why = null;
+  if (fate.status && fate.status !== "pending") why = fate.status;
+  else if (fate.status === "pending" && fate.revision !== session.revision) why = "changed";
+  if (!why || composeSession !== session) return false;
+  if (why === "changed") clearTimeout(composeSaveTimer);   // keep the typing for Drafts to recover
+  else clearComposeRecovery(session);                     // nothing left to recover into
+  hideCompose();
+  // Red only when something didn't happen or needs checking; a draft closed because it was sent
+  // or thrown away is just news.
+  toast(staleDraftMessage(why, action), action === "send" || !["dismissed", "sent"].includes(why));
+  if (state.currentFolder === "drafts") loadMessages();
+  return true;
+}
+
+// The AI changed, sent or threw away a draft. If it's the one open here, follow the saved copy:
+// close it when it's gone, reload it when it changed and nothing typed here is unsaved, so the
+// window never keeps an editor that can't save. Says what it did.
+async function draftChangedElsewhere(accountId, draftId) {
+  const session = composeSession;
+  const fate = await composeFate({accountId, id: draftId});
+  const gone = fate.status !== "pending";
+  if (gone && fate.status) try { localStorage.removeItem(recoveryKey({accountId, id: draftId})); } catch {}
+  if (!composeVisible() || !session || composeSession !== session || session.id !== draftId ||
+      session.accountId !== accountId) return "not open";
+  if (gone) return (await closeStaleCompose(session, "close")) ? "closed" : "kept";
+  if (fate.revision === session.revision) return "current";
+  if (session.busy || session.generation !== session.savedGeneration) {
+    $("compose-save-status").textContent = "Changed outside this window: copy anything new, then reopen it from Drafts";
+    return "kept";
+  }
+  clearComposeRecovery(session);   // its snapshot only holds what was saved before the change
+  $("compose-backdrop").classList.remove("show");
+  await resumeComposeDraft(draftId, accountId);
+  return "reloaded";
 }
 
 function composeRecoveryDrafts(accountId, drafts) {
@@ -160,8 +231,9 @@ async function resumeComposeDraft(draftId, accountId = state.activeAccountId) {
   catch (error) { if (cached?.account_id === accountId && cached.revision === 0) draft = cached; else { toast(String(error), true); return; } }
   if (request !== composeRequest || viewing !== state.activeAccountId) return;
   if (draft.status !== "pending") {
-    if (draft.status === "sent") clearComposeRecovery({accountId,id:draftId});
-    toast(draft.status === "sent" ? "This draft was already sent" : "Delivery needs checking. Check Sent before creating another message.", true);
+    if (draft.status === "sent" || draft.status === "dismissed") clearComposeRecovery({accountId,id:draftId});
+    toast(draft.status === "sent" ? "This draft was already sent" : draft.status === "dismissed" ? "This draft was thrown away"
+      : "Delivery needs checking. Check Sent before creating another message.", true);
     return;
   }
   if (cached?.account_id === accountId && Date.parse(cached.updated_at) > Date.parse(draft.updated_at) &&

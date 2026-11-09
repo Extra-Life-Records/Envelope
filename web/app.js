@@ -1211,7 +1211,8 @@ async function sendCompose() {
       (res.refused_recipients?.length ? "; some recipients were rejected" : ""));
     if (state.currentFolder === "sent" && (allMail() || composeAccountId === state.activeAccountId)) loadMessages();
   } catch (e) {
-    toast("Send failed: " + e, true);
+    // A draft thrown away, sent or changed outside this window can't be sent from this copy.
+    if (!(await closeStaleCompose(session, "send"))) toast("Send failed: " + e, true);
   } finally {
     setComposeBusy(session, false);
     $("send-btn").disabled = false;

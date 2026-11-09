@@ -117,6 +117,10 @@ Outlook.com and the cloud mailboxes) and what the AI changes shows up in the win
   then `mail_send` sends that exact revision. Replies always go from the mailbox the email
   is in. The tools tell the AI to send only after you've said so; email content is treated
   as untrusted data, never as instructions.
+- When the AI changes, sends or throws away a draft that's open in the window, the window
+  follows: it reloads the new words (unless you've typed something not yet saved) or closes
+  the draft. A copy that can't be saved any more never blocks the window, and `mail_show`
+  says so when it couldn't open what the AI asked for.
 - **How it connects:** the app serves `POST /mcp` on `127.0.0.1:17591` next to the window's
   files, with a bearer token kept in `%APPDATA%\SimpleMail\mcp.json`. Toolbelt registers
   `SimpleMailAgent.exe app` as the `simplemail` server on every PC: a small bridge that
