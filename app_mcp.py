@@ -386,6 +386,19 @@ class AppTools:
         except Exception:
             pass
 
+    def _follow_draft(self, account, draft_id):
+        """The window drops or reloads its copy of a draft the AI just changed, sent or threw away,
+        so it never keeps an editor that can't save (and then can't open anything else). Waits for
+        the window, since mail_show may come next; a missing or slow window doesn't fail the tool."""
+        if self.window is None:
+            return None
+        try:
+            return self._window_js(f"typeof mcpDraftChanged === 'function' ? "
+                                   f"mcpDraftChanged({json.dumps(account)}, {json.dumps(draft_id)}) : null",
+                                   timeout=15)
+        except Exception:
+            return None
+
     def _screen_refs(self, screen):
         """Give the listed and open emails message_refs the other tools take."""
         shown = (screen.get("account") or {}).get("id")
@@ -737,6 +750,8 @@ class AppTools:
                   "from": self._identity(account), "to": payload["to"], "cc": payload.get("cc", ""),
                   "subject": payload["subject"], "attachments": len(payload.get("attachment_ids") or []),
                   "sent": False}
+        if draft_id:
+            self._follow_draft(account, saved["id"])
         if show:
             result["window"] = self.show(account=account, draft_id=saved["id"])
             result["note"] = "The window saves the draft again as it opens it: mail_drafts has the revision to send"
@@ -744,11 +759,14 @@ class AppTools:
 
     def send(self, account, draft_id, revision):
         self._acct(account)
-        return self.api.send_compose_draft(account, draft_id, revision)
+        result = self.api.send_compose_draft(account, draft_id, revision)
+        self._follow_draft(account, draft_id)
+        return result
 
     def discard_draft(self, account, draft_id, revision):
         self._acct(account)
         self.api.discard_compose_draft(account, draft_id, revision)
+        self._follow_draft(account, draft_id)
         return {"account": account, "discarded": draft_id}
 
     # -- the window --------------------------------------------------------
