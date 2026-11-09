@@ -826,7 +826,8 @@ function localDraftEnvelopes(drafts) {
     sender: "Draft · " + (draft.payload.to || "No recipient"), subject: draft.payload.subject || "(no subject)",
     date: draft.updated_at, seen: true,
     snippet: draft.status === "pending" ? "Saved on this device · " + draft.payload.body.slice(0, 120)
-      : "Delivery needs checking · Open for details"}));
+      : draft.status === "uncertain" ? "Delivery needs checking · Look in Sent, then open to throw away"
+      : "Being sent · " + draft.payload.body.slice(0, 120)}));
 }
 
 async function loadMessages({ quiet = false, join = false, background = false } = {}) {

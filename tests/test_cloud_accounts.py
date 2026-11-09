@@ -9,7 +9,8 @@ from unittest.mock import Mock, patch
 
 import mailapp
 from cloud_accounts import CloudAccounts
-from cloud_mail import CloudSignInRequired, CloudServiceError
+import uuid
+from cloud_mail import CloudAccessDenied, CloudSignInRequired, CloudServiceError
 
 
 class UnifiedInboxTests(unittest.TestCase):
@@ -193,6 +194,67 @@ class UnifiedInboxTests(unittest.TestCase):
         self.assertEqual(self.api.send_compose_draft('cloud:one', draft['id'], draft['revision'])['status'], 'uncertain')
         with self.assertRaises(ValueError): self.api.send_compose_draft('cloud:one', draft['id'], draft['revision'])
         self.assertEqual(self.api.get_compose_draft('cloud:one', draft['id'])['status'], 'uncertain')
+
+    def test_refused_send_returns_draft_to_pending_with_the_reason(self):
+        # The service refused before taking the message (e.g. sender not enabled): the owner is
+        # told, the draft stays sendable at the same revision, and nothing is marked uncertain.
+        draft = self.api.save_compose_draft('cloud:one', '12345678-1234-1234-1234-123456789abc', 0, 'a@example.com','Test','Body','Body')
+        self.transport.cloud_request.side_effect = [CloudAccessDenied('This sign-in cannot access the mailbox.'), {'status':'not_started'}]
+        with self.assertRaisesRegex(ValueError, 'Not sent.*refused.*cannot access'):
+            self.api.send_compose_draft('cloud:one', draft['id'], draft['revision'])
+        again = self.api.get_compose_draft('cloud:one', draft['id'])
+        self.assertEqual((again['status'], again['revision']), ('pending', draft['revision']))
+        self.assertEqual([c.args[0] for c in self.transport.cloud_request.call_args_list], ['POST', 'GET'])
+        events = [e for e in self.api._compose_store().activity('cloud:one')['items'] if e['kind'] == 'send_failed']
+        self.assertEqual(len(events), 1)
+        self.assertIn('Not sent', events[0]['detail']['warning'])
+        # The same revision can be sent once the service accepts it; no new request ID.
+        self.transport.cloud_request.side_effect = None
+        self.transport.cloud_request.return_value = {'status':'accepted', 'provider_id':'ses-fixture'}
+        self.assertEqual(self.api.send_compose_draft('cloud:one', draft['id'], draft['revision'])['status'], 'sent')
+        self.assertEqual(self.transport.cloud_request.call_args.args[2]['request_id'], draft['id'])
+
+    def test_lost_response_with_no_server_record_is_not_sent_rather_than_uncertain(self):
+        draft = self.api.save_compose_draft('cloud:one', '12345678-1234-1234-1234-123456789abc', 0, 'a@example.com','Test','Body','Body')
+        self.transport.cloud_request.side_effect = [TimeoutError(), {'status':'not_started'}]
+        with self.assertRaisesRegex(ValueError, 'could not be reached'):
+            self.api.send_compose_draft('cloud:one', draft['id'], draft['revision'])
+        self.assertEqual(self.api.get_compose_draft('cloud:one', draft['id'])['status'], 'pending')
+
+    def test_unreadable_server_record_stays_uncertain(self):
+        draft = self.api.save_compose_draft('cloud:one', '12345678-1234-1234-1234-123456789abc', 0, 'a@example.com','Test','Body','Body')
+        self.transport.cloud_request.side_effect = [TimeoutError(), CloudServiceError('down')]
+        self.assertEqual(self.api.send_compose_draft('cloud:one', draft['id'], draft['revision'])['status'], 'uncertain')
+
+    def test_uncertain_cloud_draft_is_settled_from_the_server_record_before_discard(self):
+        def stuck():
+            draft = self.api.save_compose_draft('cloud:one', str(uuid.uuid4()), 0, 'a@example.com','Test','Body','Body')
+            self.transport.cloud_request.side_effect = [TimeoutError(), {'status':'uncertain'}]
+            self.api.send_compose_draft('cloud:one', draft['id'], draft['revision'])
+            return draft
+        never_taken, went_out, in_flight = stuck(), stuck(), stuck()
+        self.transport.reset_mock()
+        # Never taken by the service: it can go.
+        self.transport.cloud_request.side_effect = None
+        self.transport.cloud_request.return_value = {'status':'not_started'}
+        self.assertEqual(self.api.discard_compose_draft('cloud:one', never_taken['id'], 1)['status'], 'dismissed')
+        self.assertEqual(self.transport.cloud_request.call_args.args[:2], ('GET', '/mailboxes/one/sends/' + never_taken['id']))
+        self.assertEqual(self.api.get_compose_draft('cloud:one', never_taken['id'])['status'], 'dismissed')
+        # Sent after all: it becomes sent and is not thrown away.
+        self.transport.cloud_request.return_value = {'status':'accepted', 'provider_id':'ses-1'}
+        with self.assertRaisesRegex(ValueError, 'sent after all'):
+            self.api.discard_compose_draft('cloud:one', went_out['id'], 1)
+        self.assertEqual(self.api.get_compose_draft('cloud:one', went_out['id'])['status'], 'sent')
+        # Still unknown: stays put.
+        self.transport.cloud_request.return_value = {'status':'uncertain'}
+        with self.assertRaisesRegex(ValueError, 'still being checked'):
+            self.api.discard_compose_draft('cloud:one', in_flight['id'], 1)
+        self.assertEqual(self.api.get_compose_draft('cloud:one', in_flight['id'])['status'], 'uncertain')
+        # A stale revision never discards.
+        with self.assertRaises(ValueError):
+            self.api.discard_compose_draft('cloud:one', in_flight['id'], 7)
+        # Uncertain drafts remain listed until settled.
+        self.assertEqual({d['id'] for d in self.api.list_compose_drafts('cloud:one')}, {in_flight['id']})
 
     def test_discovery_failure_does_not_remove_existing_imap_accounts(self):
         self.transport.cloud_request.side_effect = ValueError('expired session')

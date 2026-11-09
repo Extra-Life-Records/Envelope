@@ -210,13 +210,24 @@ class CloudAccounts:
             result = self.transport.cloud_request('POST', '/human/mailboxes/' + account[len(PREFIX):] + '/send', data)
             if result.get('status') not in ('accepted', 'delivered'):
                 raise ValueError('Send not confirmed')
-        except Exception:
-            # A lost POST response can be reconciled by a read, never a resend.
+        except Exception as exc:
+            # Whatever the POST said (refused, timed out, lost), the server's own record of this
+            # request ID decides: it is read, never resent. "not_started" means the service never
+            # took the message (for example the sender is not enabled), so the draft goes back to
+            # Drafts as it was and the owner is told why; the same request ID keeps any later send
+            # idempotent. Only a record that cannot be read, or one still in flight, is uncertain.
+            reason = str(exc) if isinstance(exc, ValueError) else 'The mail service could not be reached.'
             try:
                 result = self.request(account, 'GET', '/sends/' + draft_id)
             except Exception:
                 result = {}
-            if result.get('status') not in ('accepted', 'delivered'):
+            status = result.get('status')
+            if status in ('not_started', 'failed'):
+                detail = {'warning': 'Not sent. ' + reason, 'request_id': draft_id, 'server_status': status}
+                store.resolve(account, draft_id, 'pending', detail)
+                raise ValueError('Not sent: the mail service refused this message, so it is still in Drafts. '
+                                 + reason) from None
+            if status not in ('accepted', 'delivered'):
                 detail = {'warning': 'Sending could not be confirmed. Check Sent before trying again. '
                           'This draft will not be sent again automatically.', 'request_id': draft_id}
                 store.finish(account, draft_id, 'uncertain', detail)
@@ -224,6 +235,26 @@ class CloudAccounts:
         store.finish(account, draft_id, 'sent', {'request_id': draft_id, 'provider_id': result.get('provider_id', '')})
         return {'status': 'sent', 'sent_as': self.accounts[account]['identity'],
                 'request_id': draft_id, 'provider_status': result['status']}
+
+    def discard_compose_draft(self, account, draft_id, revision):
+        """Throw a draft away. An uncertain one is settled first from the server's record of the
+        send: never taken means it can go; sent means it stays as sent; anything else stays put."""
+        if account not in self.accounts:
+            raise ValueError('Mailbox is not available to this sign-in')
+        store = self.owner._compose_store()
+        draft = store.get(account, draft_id)
+        if draft['status'] != 'uncertain':
+            return store.discard(account, draft_id, revision)
+        if draft['revision'] != revision:
+            raise ValueError('Draft changed or is no longer editable')
+        result = self.request(account, 'GET', '/sends/' + draft_id)
+        status = result.get('status')
+        if status in ('accepted', 'delivered'):
+            store.resolve(account, draft_id, 'sent', {'request_id': draft_id, 'provider_id': result.get('provider_id', '')})
+            raise ValueError('This draft was sent after all: it is in Sent, so it was not thrown away')
+        if status not in ('not_started', 'failed'):
+            raise ValueError('This send is still being checked. Look in Sent and try again later')
+        return store.resolve(account, draft_id, 'dismissed', {'request_id': draft_id, 'server_status': status})
 
     def send_mail(self, account, to, subject, body, body_html=None):
         # Compatibility callers also use a durable draft, never a bare POST.
