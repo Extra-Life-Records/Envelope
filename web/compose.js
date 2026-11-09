@@ -232,8 +232,20 @@ async function resumeComposeDraft(draftId, accountId = state.activeAccountId) {
   if (request !== composeRequest || viewing !== state.activeAccountId) return;
   if (draft.status !== "pending") {
     if (draft.status === "sent" || draft.status === "dismissed") clearComposeRecovery({accountId,id:draftId});
+    if (draft.status === "uncertain") {
+      // The send could not be confirmed. The owner looks in Sent, then may throw the draft away;
+      // a cloud mailbox checks the service's own record first and keeps a draft that was sent.
+      if (!confirm("This draft's send could not be confirmed. Check Sent first.\n\nThrow this draft away?")) return;
+      try {
+        await api.discard_compose_draft(accountId, draftId, draft.revision);
+        clearComposeRecovery({accountId,id:draftId});
+        toast("Thrown away");
+      } catch (error) { toast(String(error), true); }
+      if (state.currentFolder === "drafts") loadMessages();
+      return;
+    }
     toast(draft.status === "sent" ? "This draft was already sent" : draft.status === "dismissed" ? "This draft was thrown away"
-      : "Delivery needs checking. Check Sent before creating another message.", true);
+      : "This draft is being sent. Check Sent before creating another message.", true);
     return;
   }
   if (cached?.account_id === accountId && Date.parse(cached.updated_at) > Date.parse(draft.updated_at) &&

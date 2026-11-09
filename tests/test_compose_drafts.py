@@ -99,6 +99,27 @@ class ComposeTests(unittest.TestCase):
             send.assert_not_called()
         self.assertEqual(self.store.get("one", self.id)["status"], "pending")
 
+    def test_uncertain_draft_can_be_thrown_away_but_a_sending_one_cannot(self):
+        self.store.save("one", self.id, 0, self.payload)
+        self.store.claim("one", self.id, 1)
+        with self.assertRaises(ValueError):
+            self.api.discard_compose_draft("one", self.id, 1)
+        self.store.finish("one", self.id, "uncertain", {"warning": "Delivery could not be confirmed."})
+        self.assertEqual(self.api.discard_compose_draft("one", self.id, 1)["status"], "dismissed")
+        self.assertEqual(self.store.list("one"), [])
+
+    def test_resolve_settles_only_claimed_or_uncertain_sends(self):
+        self.store.save("one", self.id, 0, self.payload)
+        with self.assertRaises(ValueError):
+            self.store.resolve("one", self.id, "pending", {})
+        self.store.claim("one", self.id, 1)
+        self.assertEqual(self.store.resolve("one", self.id, "pending", {"warning": "Not sent."})["status"], "pending")
+        draft = self.store.get("one", self.id)
+        self.assertEqual((draft["status"], draft["revision"]), ("pending", 1))
+        self.assertEqual([e["kind"] for e in self.store.activity("one")["items"]], ["send_failed", "send_started"])
+        with self.assertRaises(ValueError):
+            self.store.resolve("one", self.id, "lost", {})
+
     def test_discard_hides_draft_and_stale_discard_cannot_remove_new_edit(self):
         self.store.save("one", self.id, 0, self.payload)
         self.store.save("one", self.id, 1, {**self.payload, "body": "New"})

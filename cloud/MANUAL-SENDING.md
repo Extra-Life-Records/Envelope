@@ -19,6 +19,10 @@ signature images become related MIME parts. Bcc recipients are absent from MIME.
 
 Manual delivery uses London SES, separately from the Ireland receiving API.
 `HumanSenderAddresses` must enumerate only existing approved mailbox addresses.
+Its template default is empty, which denies every sender: pass the full list on every
+deploy (see the README's redeploy command). The desktop now reads the service's record
+of a refused request and puts the draft back as pending with the reason, so a wiped
+list shows as "Not sent: the mail service refused this message" rather than "uncertain".
 `SendingEnabled` and `AiSendingEnabled` stay false. The health configuration
 may set `owner_manual_sending_enabled: true`; that permits only the manual
 flag to be enabled and continues to report general/AI transport drift.

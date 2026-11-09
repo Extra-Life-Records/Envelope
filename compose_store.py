@@ -73,13 +73,30 @@ class ComposeStore(AgentStore):
             return draft
 
     def discard(self, account_id, draft_id, revision):
+        # An uncertain draft can be thrown away too: the owner has looked in Sent. A draft
+        # still being sent cannot, so a slow send never loses its only copy.
         with self.connect() as db:
             changed = db.execute("UPDATE compose_drafts SET status='dismissed',updated_at=? "
-                                 "WHERE id=? AND account_id=? AND status='pending' AND revision=?",
+                                 "WHERE id=? AND account_id=? AND status IN ('pending','uncertain') AND revision=?",
                                  (now(), draft_id, account_id, revision)).rowcount
             if changed != 1:
                 raise ValueError("Draft changed or is no longer editable")
         return {"status": "dismissed"}
+
+    def resolve(self, account_id, draft_id, status, detail):
+        """Settle a claimed or uncertain send once its fate is known: back to pending (nothing
+        was sent, so the same revision can be sent again), sent, or dismissed."""
+        kinds = {"pending": "send_failed", "sent": "send_sent", "dismissed": "send_discarded"}
+        if status not in kinds:
+            raise ValueError("Invalid send outcome")
+        with self.connect() as db:
+            changed = db.execute("UPDATE compose_drafts SET status=?,updated_at=? "
+                                 "WHERE id=? AND account_id=? AND status IN ('sending','uncertain')",
+                                 (status, now(), draft_id, account_id)).rowcount
+            if changed != 1:
+                raise ValueError("Draft is not waiting on a send")
+            self._event(db, account_id, kinds[status], {"human_draft_id": draft_id, **detail})
+        return {"status": status}
 
     def finish(self, account_id, draft_id, status, detail):
         if status not in ("sent", "uncertain"):

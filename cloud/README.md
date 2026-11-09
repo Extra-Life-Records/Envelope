@@ -271,8 +271,15 @@ sam deploy --region eu-west-1 --profile <operator-profile> --stack-name playloud
   --capabilities CAPABILITY_IAM --resolve-s3 --no-execute-changeset `
   --parameter-overrides AuthDomain=<live> CallbackUrl=<live> Domain=<live> ReceiveDomain=<live> `
   BudgetEmail=<live> SendingEnabled=<live> ApiReservedConcurrency=<live> CreateSendingIdentity=<live> `
+  HumanSendingEnabled=<live> "HumanSenderAddresses=<live, the comma-separated sender list>" `
   ReaderEnabled=true ExternalMailboxesSecret=<secret ARN, or leave out for AWS mailboxes only>
 ```
+
+Every parameter the live stack carries must be passed again (or `--use-previous-template` with
+`UsePreviousValue` through the CloudFormation CLI). On 3 Nov 2026 a deploy left `HumanSenderAddresses`
+at its empty default, and every cloud mailbox was silently unable to send until 9 Nov: the desktop
+filed each attempt as "uncertain" although the service had refused it. Check the parameter list in
+step 1 against [MANUAL-SENDING.md](MANUAL-SENDING.md) before executing a change set.
 
 Review the change set before executing it. Expect **Add** for the `Reader*` resources (resource
 server, app client, API, stage, routes, authorizer, function, role, permissions, log group) and a code-only
