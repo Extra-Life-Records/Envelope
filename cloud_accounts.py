@@ -146,6 +146,13 @@ class CloudAccounts:
         result = self.transport.cloud_save_attachment(file)
         return {'path': result.get('path', '')}
 
+    def save_attachment_to_downloads(self, account, folder, uid, part_index, validity=None):
+        """The AI tools' save: straight to Downloads\\Envelope, never a Save As box."""
+        if not str(part_index).isdigit(): raise ValueError('Invalid attachment')
+        from mail_attachments import save_download
+        file = self.attachment_file(account, uid, part_index)
+        return {'path': save_download(file['name'], base64.b64decode(file['data']), f'attachment-{part_index}')}
+
     def attachment_file(self, account, uid, part):
         chunks, offset, identity = [], 0, None
         while True:

@@ -736,16 +736,14 @@ def save_attachment(cfg, folder, uid, part_index, expected_validity=None):
             raise RuntimeError("Could not fetch message")
         msg = message_from_bytes(data[0][1], policy=email_policy)
         parts = list(msg.walk())
+        if not 0 <= part_index < len(parts):
+            raise ValueError("Invalid attachment")
         part = parts[part_index]
         payload = part.get_payload(decode=True)
         if payload is None:
             raise RuntimeError("Attachment is not decodable")
-        name = part.get_filename() or f"attachment-{part_index}"
-        out_dir = Path.home() / "Downloads" / "Envelope"
-        out_dir.mkdir(parents=True, exist_ok=True)
-        out = out_dir / os.path.basename(name)
-        out.write_bytes(payload)
-        return str(out)
+        from mail_attachments import save_download
+        return save_download(part.get_filename(), payload, f"attachment-{part_index}")
     finally:
         imap.logout()
 
@@ -1948,6 +1946,13 @@ class Api:
     @route_cloud
     def save_attachment(self, account_id, server_folder, uid, part_index, validity=None):
         self._log(f"CALL save_attachment {account_id} {server_folder} {uid} part={part_index}")
+        path = save_attachment(self._acct(account_id), server_folder, uid, int(part_index), validity)
+        return {"path": path}
+
+    @route_cloud
+    def save_attachment_to_downloads(self, account_id, server_folder, uid, part_index, validity=None):
+        """For the AI tools: always writes to Downloads\\Envelope and never opens a Save As box."""
+        self._log(f"CALL save_attachment_to_downloads {account_id} {server_folder} {uid} part={part_index}")
         path = save_attachment(self._acct(account_id), server_folder, uid, int(part_index), validity)
         return {"path": path}
 

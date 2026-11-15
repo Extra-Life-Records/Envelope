@@ -13,6 +13,23 @@ import uuid
 from cloud_mail import CloudAccessDenied, CloudSignInRequired, CloudServiceError
 
 
+class SaveDownloadTests(unittest.TestCase):
+    def test_names_stay_inside_the_folder_and_nothing_is_overwritten(self):
+        from mail_attachments import save_download
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / 'Envelope'
+            names = ['../../Windows/System32/evil.dll', 'C:\\boot.ini', 'a:b?c*.jpg', 'CON.txt', '',
+                     None, ' . ', 'x' * 300 + '.pdf', 'report.pdf', 'report.pdf']
+            saved = [Path(save_download(name, b'data', 'attachment-3', folder)) for name in names]
+            self.assertTrue(all(path.parent == folder for path in saved))
+            self.assertEqual([path.name for path in saved[:7]],
+                             ['evil.dll', 'boot.ini', 'a_b_c_.jpg', '_CON.txt', 'attachment-3',
+                              'attachment-3 (2)', 'attachment-3 (3)'])
+            self.assertEqual((len(saved[7].name), saved[7].suffix), (150, '.pdf'))
+            self.assertEqual([saved[8].name, saved[9].name], ['report.pdf', 'report (2).pdf'])
+            self.assertEqual(len(list(folder.iterdir())), len(names))
+
+
 class UnifiedInboxTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -128,6 +145,25 @@ class UnifiedInboxTests(unittest.TestCase):
         self.transport.cloud_request.return_value = {'name':'a.txt','data':'YQ==','size':1,'offset':0,'next_offset':None,'sha256':hashlib.sha256(b'a').hexdigest()}
         self.transport.cloud_save_attachment.return_value = {'path':'selected/a.txt'}
         self.assertEqual(self.api.save_attachment('cloud:two','Inbox','abc',2)['path'], 'selected/a.txt')
+
+    def test_ai_attachment_save_never_opens_a_save_as_box(self):
+        # 14-15 Nov 2026: an AI session's mail_attachment on a cloud mailbox opened the window's
+        # Save As box (starting in System32) and the tool call timed out waiting for a person.
+        import mail_attachments
+        payload = b'\x89PNG fixture'
+        self.transport.cloud_request.return_value = {
+            'name': '..\\..\\image0.png', 'data': base64.b64encode(payload).decode(), 'size': len(payload),
+            'offset': 0, 'next_offset': None, 'sha256': hashlib.sha256(payload).hexdigest()}
+        out = Path(self.tmp.name) / 'Downloads' / 'Envelope'
+        with patch.object(mail_attachments, 'downloads_dir', return_value=out):
+            first = self.api.save_attachment_to_downloads('cloud:two', 'Inbox', 'abc', 4)['path']
+            second = self.api.save_attachment_to_downloads('cloud:two', 'Inbox', 'abc', 4)['path']
+        self.transport.cloud_save_attachment.assert_not_called()
+        self.assertEqual((Path(first).parent, Path(first).name, Path(second).name),
+                         (out, 'image0.png', 'image0 (2).png'))
+        self.assertEqual((Path(first).read_bytes(), Path(second).read_bytes()), (payload, payload))
+        with self.assertRaisesRegex(ValueError, 'Invalid attachment'):
+            self.api.save_attachment_to_downloads('cloud:two', 'Inbox', 'abc', '-1')
 
     def test_native_search_opts_in_and_preserves_opaque_cursor_and_progress(self):
         self.transport.cloud_request.return_value = {'messages': [], 'cursor': 'opaque-next',

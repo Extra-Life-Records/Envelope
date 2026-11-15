@@ -583,7 +583,8 @@ class AppTools:
 
     def attachment(self, message_ref, part_index):
         ref = self._ref(message_ref)
-        saved = self.api.save_attachment(ref["account"], ref["folder"], ref["uid"], part_index, ref.get("validity"))
+        saved = self.api.save_attachment_to_downloads(ref["account"], ref["folder"], ref["uid"], part_index,
+                                                      ref.get("validity"))
         if not saved.get("path"):
             raise ValueError("The attachment couldn't be saved")
         return {"path": saved["path"], "untrusted_content": True}

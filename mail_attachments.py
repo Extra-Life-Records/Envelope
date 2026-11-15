@@ -1,12 +1,58 @@
 """Immutable attachment bytes scoped to a mailbox; drafts reference opaque IDs."""
 import base64
 import mimetypes
+import os
+import re
 import uuid
 import hashlib
+from pathlib import Path
 from agent_store import AgentStore
 
 MAX_FILE = 10 * 1024 * 1024
 MAX_TOTAL = 20 * 1024 * 1024
+
+_UNSAFE_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
+
+
+def downloads_dir():
+    return Path.home() / "Downloads" / "Envelope"
+
+
+def safe_filename(name, fallback="attachment"):
+    """A plain file name that cannot leave the folder it is written to."""
+    base = str(name or "").replace("\\", "/").split("/")[-1]
+    base = _UNSAFE_NAME.sub("_", base).strip(" .")
+    if not base:
+        base = fallback
+    if base.split(".")[0].upper() in _RESERVED_NAMES:
+        base = "_" + base
+    stem, ext = os.path.splitext(base)
+    if len(ext) > 20:
+        stem, ext = base, ""
+    return stem[:150 - len(ext)] + ext
+
+
+def save_download(name, payload, fallback="attachment", folder=None):
+    """Write an attachment into Downloads\\Envelope without asking anyone.
+
+    Never shows a Save As box: the AI tools call this, and nobody may be at the PC.
+    An existing file is never overwritten; the new one becomes "name (2).ext"."""
+    folder = Path(folder) if folder else downloads_dir()
+    folder.mkdir(parents=True, exist_ok=True)
+    base = safe_filename(name, fallback)
+    stem, ext = os.path.splitext(base)
+    for n in range(1, 1000):
+        target = folder / (base if n == 1 else f"{stem} ({n}){ext}")
+        if target.resolve().parent != folder.resolve():
+            raise ValueError("Invalid attachment filename")
+        try:
+            with open(target, "xb") as fh:
+                fh.write(payload)
+            return str(target)
+        except FileExistsError:
+            continue
+    raise ValueError("Too many files with this name in Downloads\\Envelope")
 
 
 class AttachmentStore(AgentStore):

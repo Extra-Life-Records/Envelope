@@ -98,6 +98,13 @@ class FakeApi:
     def set_seen(self, *args):
         self.calls.append(("set_seen",) + args)
 
+    def save_attachment(self, *args):
+        raise AssertionError("the window's save can open a Save As box; the AI tool must not use it")
+
+    def save_attachment_to_downloads(self, *args):
+        self.calls.append(("save_attachment_to_downloads",) + args)
+        return {"path": "C:/Users/x/Downloads/Envelope/a.pdf"}
+
     def get_compose_context(self, account_id, folder, uid, reply_all=False, forward=False, validity=None):
         self.calls.append(("context", account_id, folder, uid, reply_all, forward, validity))
         return {"to": "Person <person@example.com>", "cc": "", "in_reply_to": "<orig@example.com>",
@@ -238,6 +245,11 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(page["items"][0]["from"], "Fan <fan@example.com>")
         with self.assertRaisesRegex(ValueError, "no folder called"):
             self.tools.list("denby", "Nowhere")
+
+    def test_attachment_tool_saves_without_asking_anyone(self):
+        ref = pack({"account": "cloud:adam", "folder": "Inbox", "validity": None, "uid": "m3"})
+        self.assertEqual(self.tools.attachment(ref, 2)["path"], "C:/Users/x/Downloads/Envelope/a.pdf")
+        self.assertEqual(self.api.calls[-1], ("save_attachment_to_downloads", "cloud:adam", "Inbox", "m3", 2, None))
 
     def test_cloud_list_and_read_leave_mail_unread(self):
         page = self.tools.list("cloud:adam", "Inbox")
